@@ -827,3 +827,8 @@ def _benjamini_hochberg(pvalues: np.ndarray, alpha: float) -> np.ndarray:
         reject_mask = np.zeros(m, dtype=bool)
     
     return reject_mask
+
+
+# Experimental Falcon-SR API. Legacy prototype functions remain exported while
+# the screen-refine research gates are being evaluated.
+from falcon.single import infer_single

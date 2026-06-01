@@ -7,7 +7,13 @@ from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, cg
 
 from falcon.preprocessing import PreprocessReport, prepare_log_composition
-from falcon.types import CandidateSet
+from falcon.screen import edge_overlap, single_candidates
+from falcon.types import (
+    CandidateSet,
+    EdgeTable,
+    NetworkResult,
+    ScreenDiagnostics,
+)
 
 
 @dataclass(frozen=True)
@@ -227,4 +233,113 @@ def sparse_refine_single(
         basis_variance=basis_variance,
         excluded_pairs=excluded_array,
         rounds=len(excluded),
+    )
+
+
+def _sign_stability(left: EdgeTable, right: EdgeTable) -> float:
+    left_map = dict(zip(map(tuple, left.pairs), np.sign(left.scores)))
+    right_map = dict(zip(map(tuple, right.pairs), np.sign(right.scores)))
+    shared = left_map.keys() & right_map.keys()
+    return 1.0 if not shared else float(
+        np.mean([left_map[pair] == right_map[pair] for pair in shared])
+    )
+
+
+def _strong_edges(edges: EdgeTable, limit: int) -> EdgeTable:
+    count = min(limit, edges.pairs.shape[0])
+    indices = np.argsort(-np.abs(edges.scores))[:count]
+    return EdgeTable(pairs=edges.pairs[indices], scores=edges.scores[indices])
+
+
+def infer_single(
+    counts: np.ndarray,
+    *,
+    mode: str = "fast",
+    top_k: int = 50,
+    max_top_k: int | None = None,
+    min_abs_score: float | None = None,
+    exclusion_threshold: float = 0.1,
+    max_exclusions: int = 10,
+    stability_threshold: float = 0.95,
+) -> NetworkResult:
+    base = single_base_score(counts)
+    p = base.correlation.shape[0]
+    if mode == "strict":
+        strict = strict_refine_single(
+            base.variation,
+            exclusion_threshold=exclusion_threshold,
+            max_exclusions=max_exclusions,
+        )
+        rows, cols = np.triu_indices(p, k=1)
+        pairs = np.column_stack([rows, cols])
+        return NetworkResult(
+            edges=EdgeTable(pairs=pairs, scores=strict.correlation[rows, cols]),
+            diagnostics=ScreenDiagnostics(
+                initial_top_k=p - 1,
+                final_top_k=p - 1,
+                candidate_count=pairs.shape[0],
+                candidate_density=1.0,
+                growth_rounds=0,
+                overlap_across_budgets=1.0,
+                sign_stability_across_budgets=1.0,
+                fallback_reason=None,
+            ),
+            initial_matrix=strict.correlation,
+        )
+    if mode != "fast":
+        raise ValueError("mode must be 'fast' or 'strict'")
+
+    budget = min(top_k, p - 1)
+    if max_top_k is not None and max_top_k < budget:
+        raise ValueError("max_top_k must be greater than or equal to top_k")
+    max_top_k = min(max_top_k or max(budget, 2 * budget), p - 1)
+    previous = None
+    growth_rounds = 0
+    overlap = 1.0
+    sign_stability = 1.0
+    fallback_reason = None
+    strong_edge_limit = p
+    while True:
+        candidates = single_candidates(
+            base.correlation,
+            top_k=budget,
+            min_abs_score=min_abs_score,
+        )
+        refined = sparse_refine_single(
+            base.variation,
+            candidates,
+            exclusion_threshold=exclusion_threshold,
+            max_exclusions=max_exclusions,
+        )
+        edges = EdgeTable(pairs=refined.pairs, scores=refined.scores)
+        if previous is not None:
+            previous_strong = _strong_edges(previous, strong_edge_limit)
+            current_strong = _strong_edges(edges, strong_edge_limit)
+            overlap = edge_overlap(previous_strong.pairs, current_strong.pairs)
+            sign_stability = _sign_stability(previous_strong, current_strong)
+            if (
+                overlap >= stability_threshold
+                and sign_stability >= stability_threshold
+            ):
+                break
+        if budget >= max_top_k:
+            fallback_reason = "candidate budget reached before stability"
+            break
+        previous = edges
+        budget = min(2 * budget, max_top_k)
+        growth_rounds += 1
+
+    return NetworkResult(
+        edges=edges,
+        diagnostics=ScreenDiagnostics(
+            initial_top_k=min(top_k, p - 1),
+            final_top_k=budget,
+            candidate_count=edges.pairs.shape[0],
+            candidate_density=candidates.density,
+            growth_rounds=growth_rounds,
+            overlap_across_budgets=overlap,
+            sign_stability_across_budgets=sign_stability,
+            fallback_reason=fallback_reason,
+        ),
+        initial_matrix=None,
     )
