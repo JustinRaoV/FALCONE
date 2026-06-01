@@ -72,6 +72,11 @@ packages = ["src/falcon"]
 [tool.uv]
 no-build-package = ["matplotlib", "contourpy", "kiwisolver", "pillow"]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
 # Note: matplotlib is intentionally NOT in any default dependency group
 # because the server (which only runs the benchmarks) does not need it.
 # Old compilers on shared HPC nodes (e.g. GCC 4.8.x) cannot build the
