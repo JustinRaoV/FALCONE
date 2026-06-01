@@ -74,3 +74,50 @@ def single_base_score(counts: np.ndarray) -> SingleBaseResult:
         correlation=correlation,
         preprocess_report=prepared.report,
     )
+
+
+@dataclass(frozen=True)
+class StrictRefinementResult:
+    correlation: np.ndarray
+    basis_variance: np.ndarray
+    excluded_pairs: np.ndarray
+    rounds: int
+
+
+def strict_refine_single(
+    variation: np.ndarray,
+    *,
+    exclusion_threshold: float = 0.1,
+    max_exclusions: int = 10,
+) -> StrictRefinementResult:
+    excluded: list[tuple[int, int]] = []
+    for _ in range(max_exclusions):
+        excluded_array = np.asarray(excluded, dtype=np.int64).reshape(-1, 2)
+        basis_variance = solve_basis_variance_dense(
+            variation,
+            excluded=excluded_array,
+        )
+        correlation = correlations_from_basis(variation, basis_variance)
+        absolute = np.abs(correlation)
+        np.fill_diagonal(absolute, -np.inf)
+        for i, j in excluded:
+            absolute[i, j] = -np.inf
+            absolute[j, i] = -np.inf
+        flat_index = int(np.argmax(absolute))
+        i, j = np.unravel_index(flat_index, absolute.shape)
+        if absolute[i, j] <= exclusion_threshold:
+            break
+        excluded.append((min(i, j), max(i, j)))
+
+    excluded_array = np.asarray(excluded, dtype=np.int64).reshape(-1, 2)
+    basis_variance = solve_basis_variance_dense(
+        variation,
+        excluded=excluded_array,
+    )
+    correlation = correlations_from_basis(variation, basis_variance)
+    return StrictRefinementResult(
+        correlation=correlation,
+        basis_variance=basis_variance,
+        excluded_pairs=excluded_array,
+        rounds=len(excluded),
+    )
