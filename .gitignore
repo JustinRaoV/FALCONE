@@ -39,6 +39,9 @@ src/falcon/__pycache__/
 
 # Anything generated to /tmp is not part of the repo
 
+# Local git worktrees used for isolated feature development
+.worktrees/
+
 # Local reference papers (copyrighted journal PDFs, do not redistribute)
 ref/
 
