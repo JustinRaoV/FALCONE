@@ -61,9 +61,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/falcon"]
 
-# Dependency groups (PEP 735) — install with `uv sync --group dev`.
-# The old `tool.uv.dev-dependencies` block is deprecated.
-[dependency-groups]
-dev = [
-    "matplotlib>=3.8",
-]
+# Refuse to compile heavy scientific packages from source if no wheel is
+# available. Saves users with old system compilers (e.g. GCC 4.8.5 on
+# legacy CentOS / RHEL 7 HPC nodes) from cryptic C++17 build failures.
+[tool.uv]
+no-build-package = ["numpy", "scipy", "scikit-learn", "matplotlib",
+                    "contourpy", "kiwisolver", "pillow"]
+
+# Note: matplotlib is intentionally NOT in any default dependency group
+# because the server (which only runs the benchmarks) does not need it.
+# Old compilers on shared HPC nodes (e.g. GCC 4.8.x) cannot build the
+# newest contourpy from source; `uv sync` would then fail unnecessarily.
+# To enable figure generation locally, run:  `uv sync --extra figures`

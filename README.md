@@ -56,17 +56,25 @@ management. From a fresh clone:
 
 ```bash
 git clone https://github.com/JustinRaoV/FALCONE.git && cd FALCONE
-uv sync                         # creates .venv and installs runtime deps
-uv sync --extra figures         # also install matplotlib (for figure scripts)
+uv sync                         # runtime deps only (numpy/scipy/scikit-learn) — for the server
+uv sync --extra figures         # +matplotlib (for figure scripts) — for the laptop
 ```
 
 `uv` will pick a CPython in the range `>=3.10,<3.13` (Python 3.13 wheels
-for the scientific stack are still incomplete as of early 2025); if it
-emits a TLS error against PyPI, add `--native-tls`. To run any
-command inside the project environment, prefix it with `uv run`, e.g.\
-`uv run python manuscript/figures/generate_fig1.py`. If you prefer plain
-pip, `python -m venv .venv && source .venv/bin/activate && pip install -e .`
-works equivalently.
+for the scientific stack are still incomplete as of early 2025). To run
+any command inside the project environment, prefix it with `uv run`,
+e.g.\ `uv run python manuscript/figures/generate_fig1.py`.
+
+Common fixes for shared HPC nodes:
+- **PyPI TLS rejection:** add `--native-tls` (`uv sync --native-tls`)
+- **No wheel for an old compiler (e.g.\ contourpy needs C++17, but GCC
+  4.8.5 on RHEL 7 only goes to C++14):** `uv sync` already skips the
+  `figures` extra by default, and `pyproject.toml` declares
+  `no-build-package = [numpy, scipy, scikit-learn, matplotlib, ...]`
+  so heavy packages are never compiled from source.
+
+If you prefer plain pip, `python -m venv .venv && source .venv/bin/activate
+&& pip install -e .` works equivalently.
 
 ### 2. Use the library
 

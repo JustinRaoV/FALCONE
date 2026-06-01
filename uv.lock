@@ -124,11 +124,6 @@ figures = [
     { name = "matplotlib" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "matplotlib" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", marker = "extra == 'figures'", specifier = ">=3.8" },
@@ -137,9 +132,6 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.11" },
 ]
 provides-extras = ["figures"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "matplotlib", specifier = ">=3.8" }]
 
 [[package]]
 name = "fonttools"
