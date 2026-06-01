@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import sparse
+from scipy.sparse.linalg import LinearOperator, cg
 
 from falcon.preprocessing import PreprocessReport, prepare_log_composition
+from falcon.types import CandidateSet
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,110 @@ def strict_refine_single(
     correlation = correlations_from_basis(variation, basis_variance)
     return StrictRefinementResult(
         correlation=correlation,
+        basis_variance=basis_variance,
+        excluded_pairs=excluded_array,
+        rounds=len(excluded),
+    )
+
+
+def solve_basis_variance_sparse(
+    variation: np.ndarray,
+    *,
+    excluded: np.ndarray,
+    min_variance: float = 1e-4,
+) -> np.ndarray:
+    p = variation.shape[0]
+    excluded = np.asarray(excluded, dtype=np.int64).reshape(-1, 2)
+    rhs = variation.sum(axis=1).copy()
+    if excluded.size:
+        edge_variation = variation[excluded[:, 0], excluded[:, 1]]
+        rhs -= np.bincount(
+            np.concatenate([excluded[:, 0], excluded[:, 1]]),
+            weights=np.concatenate([edge_variation, edge_variation]),
+            minlength=p,
+        )
+    degree = np.bincount(excluded.ravel(), minlength=p).astype(np.float64)
+    if excluded.size:
+        rows = np.concatenate([excluded[:, 0], excluded[:, 1]])
+        cols = np.concatenate([excluded[:, 1], excluded[:, 0]])
+        adjacency = sparse.csr_matrix(
+            (np.ones(rows.size), (rows, cols)),
+            shape=(p, p),
+        )
+    else:
+        adjacency = sparse.csr_matrix((p, p))
+
+    def matvec(vector: np.ndarray) -> np.ndarray:
+        return vector.sum() + (p - 2.0 - degree) * vector - adjacency @ vector
+
+    operator = LinearOperator((p, p), matvec=matvec, dtype=np.float64)
+    solution, info = cg(operator, rhs, rtol=1e-10, atol=1e-12, maxiter=10 * p)
+    if info != 0:
+        raise RuntimeError(f"sparse basis solve did not converge: info={info}")
+    return np.maximum(solution, min_variance)
+
+
+@dataclass(frozen=True)
+class SparseRefinementResult:
+    pairs: np.ndarray
+    scores: np.ndarray
+    basis_variance: np.ndarray
+    excluded_pairs: np.ndarray
+    rounds: int
+
+
+def _candidate_scores(
+    variation: np.ndarray,
+    basis_variance: np.ndarray,
+    pairs: np.ndarray,
+) -> np.ndarray:
+    left = pairs[:, 0]
+    right = pairs[:, 1]
+    covariance = 0.5 * (
+        basis_variance[left] + basis_variance[right] - variation[left, right]
+    )
+    return np.clip(
+        covariance / np.sqrt(basis_variance[left] * basis_variance[right]),
+        -1.0,
+        1.0,
+    )
+
+
+def sparse_refine_single(
+    variation: np.ndarray,
+    candidates: CandidateSet,
+    *,
+    exclusion_threshold: float = 0.1,
+    max_exclusions: int = 10,
+) -> SparseRefinementResult:
+    excluded: list[tuple[int, int]] = []
+    excluded_indices: set[int] = set()
+    for _ in range(max_exclusions):
+        excluded_array = np.asarray(excluded, dtype=np.int64).reshape(-1, 2)
+        basis_variance = solve_basis_variance_sparse(
+            variation,
+            excluded=excluded_array,
+        )
+        scores = _candidate_scores(variation, basis_variance, candidates.pairs)
+        available = np.ones(scores.size, dtype=bool)
+        if excluded_indices:
+            available[list(excluded_indices)] = False
+        masked = np.where(available, np.abs(scores), -np.inf)
+        edge_index = int(np.argmax(masked))
+        if masked[edge_index] <= exclusion_threshold:
+            break
+        excluded_indices.add(edge_index)
+        excluded.append(tuple(candidates.pairs[edge_index]))
+
+    excluded_array = np.asarray(excluded, dtype=np.int64).reshape(-1, 2)
+    basis_variance = solve_basis_variance_sparse(
+        variation,
+        excluded=excluded_array,
+    )
+    scores = _candidate_scores(variation, basis_variance, candidates.pairs)
+    return SparseRefinementResult(
+        pairs=candidates.pairs,
+        scores=scores,
         basis_variance=basis_variance,
         excluded_pairs=excluded_array,
         rounds=len(excluded),
