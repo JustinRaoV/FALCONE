@@ -153,25 +153,31 @@ def recall_at_k(scores, labels, k):
 
 
 def scalability_cell(args):
+    """Measure wall-clock of FastProp, RandProp, and SparCC on the same
+    (n, p) cell. SparCC is the standard published baseline; including it
+    here lets the scalability figure honestly compare apples-to-apples
+    (everyone touches the same input, with the same hardware, in the
+    same process)."""
     n, p = args
     from falcon import fastprop, randprop  # noqa: E402
+    from comparison_methods import sparcc_py  # noqa: E402
 
     rng = np.random.default_rng(42)
     counts = rng.integers(0, 200, size=(n, p))
     bytes_dense = p * p * 8
-    if bytes_dense < 1.5e9:
-        t0 = time.perf_counter()
-        rho = fastprop(counts, shrinkage=True)
-        t_fast = time.perf_counter() - t0
-        del rho
+    can_dense = bytes_dense < 1.5e9
+
+    if can_dense:
+        t0 = time.perf_counter(); fastprop(counts, shrinkage=True); t_fast = time.perf_counter() - t0
+        t0 = time.perf_counter(); sparcc_py(counts); t_sparcc = time.perf_counter() - t0
     else:
-        t_fast = float("nan")
-    t0 = time.perf_counter()
-    W = randprop(counts, k=50, seed=42)
-    t_rand = time.perf_counter() - t0
-    del W, counts
+        t_fast = t_sparcc = float("nan")
+
+    t0 = time.perf_counter(); randprop(counts, k=50, seed=42); t_rand = time.perf_counter() - t0
+    del counts
     return {"n": n, "p": p, "fastprop_sec": t_fast,
-            "randprop_sec": t_rand, "host": HOSTNAME}
+            "sparcc_sec": t_sparcc, "randprop_sec": t_rand,
+            "host": HOSTNAME}
 
 
 def detection_cell(args):
@@ -451,6 +457,7 @@ def run_scalability(n_list, p_list, workers):
             append_row("scalability", result)
             print(f"  ({i}/{len(cells)}) n={result['n']}, p={result['p']}: "
                   f"FastProp={result['fastprop_sec']:.3f}s, "
+                  f"SparCC={result['sparcc_sec']:.3f}s, "
                   f"RandProp={result['randprop_sec']:.3f}s", flush=True)
 
 

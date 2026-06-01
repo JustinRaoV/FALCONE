@@ -35,7 +35,8 @@ DATA_DIR.mkdir(exist_ok=True)
 # Canonical column orders — keep stable so figures don't break when CSVs are
 # regenerated on the server.
 COLUMNS = {
-    "scalability": ["n", "p", "fastprop_sec", "randprop_sec", "host"],
+    "scalability": ["n", "p", "fastprop_sec", "sparcc_sec",
+                    "randprop_sec", "host"],
     "detection": [
         "n", "p", "effect", "n_reps",
         "power_mean", "power_std",

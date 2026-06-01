@@ -37,37 +37,41 @@ rm -f data/*.csv
 PY="${PYTHON:-python}"
 RUNNER="benchmarks/run_on_server.py"
 
-# Grids below are tuned for ~1 hour total on a 16-core node. To push
-# harder (e.g. add p=10000 scalability, p=2000 method_comparison),
-# expand the --p / --n arguments below; rolling-saves mean a partial
-# run still leaves usable CSVs.
+# Grids below target ~10 minutes total on a 16-core node, while
+# covering biologically realistic regimes (samples <= 1000, features
+# <= 10000) and ensuring every method that appears in a comparison
+# panel ran on the SAME (n, p) cells -- no cherry-picking. SPIEC-EASI-
+# glasso is O(p^3) per iteration and cannot run at p >= 2000 in any
+# reasonable time, so method_comparison naturally caps at p=1000.
+# Scalability uses FastProp/SparCC/RandProp (all O(np^2)) and goes
+# all the way to p=10000.
 
-echo "==> [1/5] scalability  (FastProp + RandProp wall-clock; ~10 min)"
+echo "==> [1/5] scalability  (FastProp + SparCC + RandProp up to p=10000; ~2 min)"
 "$PY" "$RUNNER" --task scalability --workers "$WORKERS" \
-    --n 500 1000 2000 \
-    --p 500 1000 2000 5000
+    --n 500 1000 \
+    --p 500 1000 2000 5000 10000
 
-echo "==> [2/5] detection  (power + AUROC + Recall@K; ~15 min)"
+echo "==> [2/5] detection  (FastProp power + AUROC + Recall@K; ~2 min)"
 "$PY" "$RUNNER" --task detection --workers "$WORKERS" --reps 5 \
-    --n 500 1000 2000 \
+    --n 500 1000 \
     --p 500 1000 2000 \
     --rho 0.4 0.7
 
-echo "==> [3/5] method_comparison  (6 methods including SPIEC-EASI; ~20 min)"
-echo "    NOTE: SPIEC-EASI-glasso is O(p^3) and is the wall-clock bottleneck;"
-echo "          we cap at p=1000 by default to keep total runtime under 1 h."
+echo "==> [3/5] method_comparison  (ALL 6 methods on same cells; ~3 min)"
+echo "    Fair-comparison grid: every cell runs every method to completion."
+echo "    SPIEC-EASI-glasso is O(p^3); cap p=1000 keeps the cell budget reasonable."
 "$PY" "$RUNNER" --task method_comparison --workers "$WORKERS" --reps 5 \
     --n 500 1000 \
     --p 500 1000 \
     --rho 0.7
 
-echo "==> [4/5] cross_domain  (5 methods, planted phage-bacteria; ~10 min)"
+echo "==> [4/5] cross_domain  (ALL 5 methods on same simulator; ~2 min)"
 "$PY" "$RUNNER" --task cross_domain --workers "$WORKERS" --reps 10 \
     --cross-n 300 --cross-p 500 --cross-q 500 --cross-edges 50
 
-echo "==> [5/5] fdr_control  (FastProp BH-FDR calibration; ~5 min)"
-"$PY" "$RUNNER" --task fdr_control --workers "$WORKERS" --reps 15 \
-    --fdr-n 2000 --fdr-p 500 \
+echo "==> [5/5] fdr_control  (FastProp BH-FDR calibration; ~1 min)"
+"$PY" "$RUNNER" --task fdr_control --workers "$WORKERS" --reps 10 \
+    --fdr-n 1000 --fdr-p 500 \
     --alpha 0.01 0.05 0.10 0.20
 
 OUT="falcon_results_$(hostname)_$(date +%Y%m%d_%H%M).tar.gz"
