@@ -49,11 +49,20 @@ Every CSV table can be regenerated from scratch by `run_on_server.py`.
 
 ## Quickstart
 
-### 1. Install
+### 1. Install (uv)
+
+We use [`uv`](https://github.com/astral-sh/uv) for environment + dependency
+management. From a fresh clone:
 
 ```bash
-pip install -e .                # or: uv sync
+git clone https://github.com/JustinRaoV/FALCONE.git && cd FALCONE
+uv sync                         # creates .venv and installs all deps
 ```
+
+To run any subsequent command inside the project environment, prefix it
+with `uv run`, e.g.\ `uv run python manuscript/figures/generate_fig1.py`.
+If you prefer plain pip, `python -m venv .venv && source .venv/bin/activate
+&& pip install -e .` works equivalently.
 
 ### 2. Use the library
 
@@ -78,17 +87,14 @@ The CSVs in `data/` are already populated from the simulation runs that
 back the paper. To regenerate the figures from those CSVs:
 
 ```bash
-python manuscript/figures/generate_workflow.py
-python manuscript/figures/generate_single_domain.py
-python manuscript/figures/generate_cross_domain.py
-python manuscript/figures/generate_method_comparison.py
+uv run python manuscript/figures/generate_fig1.py
+uv run python manuscript/figures/generate_fig2.py
 ```
 
 To recompile the paper:
 
 ```bash
-cd manuscript
-pdflatex main && bibtex main && pdflatex main && pdflatex main
+cd manuscript && pdflatex main && bibtex main && pdflatex main && pdflatex main
 ```
 
 ### 4. (Optional) Install FastSpar for a real wall-clock head-to-head
@@ -116,27 +122,21 @@ script will pick up the measured times automatically.
 
 ### 5. Re-run the benchmarks (server)
 
-The benchmark runner uses `multiprocessing.Pool` and writes CSVs
-incrementally, so killed jobs lose at most the in-flight cell.
+`benchmarks/run_all.sh` is the canonical one-line entry point. It runs
+all five benchmark tasks in sequence with sensible grids and tars up the
+results:
 
 ```bash
-# All four benchmark tables, 8 workers
-python benchmarks/run_on_server.py --workers 8
-
-# Just the detection grid up to p=10000 and n=5000
-python benchmarks/run_on_server.py --task detection \
-    --workers 8 --reps 10 \
-    --p 100 500 1000 5000 10000 \
-    --n 500 1000 2000 5000 \
-    --rho 0.4 0.7
-
-# Just scalability
-python benchmarks/run_on_server.py --task scalability \
-    --workers 8 --n 500 1000 2000 5000 --p 1000 2000 5000 10000
+git clone https://github.com/JustinRaoV/FALCONE.git && cd FALCONE && \
+    uv sync && uv run bash benchmarks/run_all.sh 16
 ```
 
-Each row in `data/scalability.csv` records the `host` (`socket.gethostname()`)
-so multiple machines can contribute measurements to the same file.
+Sub-tasks can be re-run individually with `uv run python benchmarks/run_on_server.py
+--task {scalability,detection,method_comparison,cross_domain,fdr_control}`;
+each writes incrementally to `data/<task>.csv` so a killed job loses at
+most the in-flight cell. Each row in `data/scalability.csv` records the
+`host` (`socket.gethostname()`) so multiple machines can contribute
+measurements to the same file.
 
 ---
 

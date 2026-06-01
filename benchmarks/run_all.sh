@@ -2,14 +2,20 @@
 #
 # Run every FALCON benchmark and produce a tar.gz to ship back.
 #
-# This is the single command to run on the server. Each task is launched
-# with its own (n, p, rho) grid because the five tasks have different
-# scaling characteristics; running them sequentially through one script
-# avoids requiring users to remember five separate invocations.
+# Single command on the server. Each task is launched with its own
+# (n, p, rho) grid because the five tasks have different scaling
+# characteristics. Tasks run sequentially; CSVs are rolling-saved so a
+# killed job loses at most the in-flight cell.
 #
-# Usage:
-#     bash benchmarks/run_all.sh [WORKERS]
-# Default WORKERS = 16.
+# Usage (uv-managed environment, preferred):
+#     uv sync                              # one-time: create .venv + install deps
+#     uv run bash benchmarks/run_all.sh    # run with default 16 workers
+#     uv run bash benchmarks/run_all.sh 32 # or pick worker count
+#
+# Or if uv is not available:
+#     python -m venv .venv && source .venv/bin/activate
+#     pip install -e .
+#     bash benchmarks/run_all.sh 16
 #
 # Output: data/*.csv (rolling-saved as cells finish) and
 #         falcon_results_<host>_<date>.tar.gz at repo root.
