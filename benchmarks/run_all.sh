@@ -8,11 +8,13 @@
 # killed job loses at most the in-flight cell.
 #
 # Usage (uv-managed environment, preferred):
-#     uv sync                              # one-time: create .venv + install deps
-#     uv run bash benchmarks/run_all.sh    # run with default 16 workers
-#     uv run bash benchmarks/run_all.sh 32 # or pick worker count
+#     uv sync                                  # one-time: create .venv + deps
+#     uv run bash benchmarks/run_all.sh        # default 16 workers
+#     uv run bash benchmarks/run_all.sh 32     # explicit worker count
 #
-# Or if uv is not available:
+# If your server fails the PyPI TLS handshake, use `uv sync --native-tls`.
+#
+# Or if uv is unavailable:
 #     python -m venv .venv && source .venv/bin/activate
 #     pip install -e .
 #     bash benchmarks/run_all.sh 16

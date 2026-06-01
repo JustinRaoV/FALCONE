@@ -56,13 +56,17 @@ management. From a fresh clone:
 
 ```bash
 git clone https://github.com/JustinRaoV/FALCONE.git && cd FALCONE
-uv sync                         # creates .venv and installs all deps
+uv sync                         # creates .venv and installs runtime deps
+uv sync --extra figures         # also install matplotlib (for figure scripts)
 ```
 
-To run any subsequent command inside the project environment, prefix it
-with `uv run`, e.g.\ `uv run python manuscript/figures/generate_fig1.py`.
-If you prefer plain pip, `python -m venv .venv && source .venv/bin/activate
-&& pip install -e .` works equivalently.
+`uv` will pick a CPython in the range `>=3.10,<3.13` (Python 3.13 wheels
+for the scientific stack are still incomplete as of early 2025); if it
+emits a TLS error against PyPI, add `--native-tls`. To run any
+command inside the project environment, prefix it with `uv run`, e.g.\
+`uv run python manuscript/figures/generate_fig1.py`. If you prefer plain
+pip, `python -m venv .venv && source .venv/bin/activate && pip install -e .`
+works equivalently.
 
 ### 2. Use the library
 

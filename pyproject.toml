@@ -3,7 +3,11 @@ name = "falcon-net"
 version = "0.1.0"
 description = "FALCON: Fast Algorithm for Large-scale Cross-domain Compositional Network Inference"
 readme = "README.md"
-requires-python = ">=3.10"
+# Pin a Python window where every dependency we use has wheels.
+# 3.10 is the floor (NumPy 2.x dropped 3.9); 3.13 is excluded because
+# scientific stack stable Python-3.13 wheels are still partial as of
+# 2025-Q1 and trip uv's resolver. 3.11 / 3.12 are both safe.
+requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }
 authors = [
     { name = "Jun Rao" },
@@ -23,13 +27,19 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
+# Minimal, audited runtime deps. We do not use pandas (CSV I/O is via the
+# stdlib csv module). scikit-learn is a runtime dep because comparison_methods.py
+# imports it for SPIEC-EASI baselines; if you only use the FALCON algorithms
+# themselves (FastProp / RandProp / CrossNet), numpy + scipy are enough.
 dependencies = [
-    "numpy>=1.24",
-    "scipy>=1.10",
-    "scikit-learn>=1.3",
-    "pandas>=2.0",
+    "numpy>=1.26,<3",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
 ]
 
 [project.urls]
@@ -38,8 +48,10 @@ Repository = "https://github.com/JustinRaoV/FALCONE"
 Issues = "https://github.com/JustinRaoV/FALCONE/issues"
 
 [project.optional-dependencies]
+# Optional: install with `uv sync --extra figures` to enable
+# manuscript/figures/generate_*.py
 figures = [
-    "matplotlib>=3.7",
+    "matplotlib>=3.8",
 ]
 
 [build-system]
@@ -49,7 +61,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/falcon"]
 
-[tool.uv]
-dev-dependencies = [
-    "matplotlib>=3.7",
+# Dependency groups (PEP 735) — install with `uv sync --group dev`.
+# The old `tool.uv.dev-dependencies` block is deprecated.
+[dependency-groups]
+dev = [
+    "matplotlib>=3.8",
 ]
