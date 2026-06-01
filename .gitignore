@@ -33,6 +33,7 @@ env/
 *.lot
 
 # Project-specific
+.worktrees/
 benchmarks/__pycache__/
 manuscript/figures/__pycache__/
 src/falcon/__pycache__/
