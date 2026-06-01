@@ -36,10 +36,13 @@ classifiers = [
 # stdlib csv module). scikit-learn is a runtime dep because comparison_methods.py
 # imports it for SPIEC-EASI baselines; if you only use the FALCON algorithms
 # themselves (FastProp / RandProp / CrossNet), numpy + scipy are enough.
+# Caps below pin to the last versions that still ship manylinux2014_x86_64
+# wheels (glibc 2.17 = RHEL 7 / CentOS 7), so installs on legacy HPC nodes
+# do not have to fall back to source builds.
 dependencies = [
-    "numpy>=1.26,<3",
-    "scipy>=1.11",
-    "scikit-learn>=1.4",
+    "numpy>=1.26,<2.3",
+    "scipy>=1.11,<1.15",
+    "scikit-learn>=1.4,<1.7",
 ]
 
 [project.urls]
@@ -61,12 +64,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/falcon"]
 
-# Refuse to compile heavy scientific packages from source if no wheel is
-# available. Saves users with old system compilers (e.g. GCC 4.8.5 on
-# legacy CentOS / RHEL 7 HPC nodes) from cryptic C++17 build failures.
+# Only refuse source builds for packages that genuinely require C++17 or
+# other modern toolchain features (matplotlib's plotting stack). numpy /
+# scipy / scikit-learn are pure C + Fortran and compile on GCC 4.8.5 if
+# no manylinux wheel is available for the host platform, so we leave them
+# unrestricted to maximise install success on old HPC nodes.
 [tool.uv]
-no-build-package = ["numpy", "scipy", "scikit-learn", "matplotlib",
-                    "contourpy", "kiwisolver", "pillow"]
+no-build-package = ["matplotlib", "contourpy", "kiwisolver", "pillow"]
 
 # Note: matplotlib is intentionally NOT in any default dependency group
 # because the server (which only runs the benchmarks) does not need it.
