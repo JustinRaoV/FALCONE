@@ -37,31 +37,36 @@ rm -f data/*.csv
 PY="${PYTHON:-python}"
 RUNNER="benchmarks/run_on_server.py"
 
-echo "==> [1/5] scalability  (FastProp + RandProp wall-clock, up to p=10000, n=5000)"
+# Grids below are tuned for ~1 hour total on a 16-core node. To push
+# harder (e.g. add p=10000 scalability, p=2000 method_comparison),
+# expand the --p / --n arguments below; rolling-saves mean a partial
+# run still leaves usable CSVs.
+
+echo "==> [1/5] scalability  (FastProp + RandProp wall-clock; ~10 min)"
 "$PY" "$RUNNER" --task scalability --workers "$WORKERS" \
-    --n 500 1000 2000 5000 \
-    --p 500 1000 2000 5000 10000
+    --n 500 1000 2000 \
+    --p 500 1000 2000 5000
 
-echo "==> [2/5] detection  (power + AUROC + Recall@K across (n, p, rho))"
-"$PY" "$RUNNER" --task detection --workers "$WORKERS" --reps 10 \
-    --n 500 1000 2000 5000 \
-    --p 500 1000 2000 5000 \
-    --rho 0.4 0.7
-
-echo "==> [3/5] method_comparison  (FastProp vs SparCC vs Pearson vs SPIEC-EASI x2)"
-echo "    NOTE: SPIEC-EASI-glasso is O(p^3) per iteration; at p>=2000 each cell"
-echo "          takes minutes. Cap at p=2000 by default to keep wall-clock bounded."
-"$PY" "$RUNNER" --task method_comparison --workers "$WORKERS" --reps 5 \
+echo "==> [2/5] detection  (power + AUROC + Recall@K; ~15 min)"
+"$PY" "$RUNNER" --task detection --workers "$WORKERS" --reps 5 \
     --n 500 1000 2000 \
     --p 500 1000 2000 \
+    --rho 0.4 0.7
+
+echo "==> [3/5] method_comparison  (6 methods including SPIEC-EASI; ~20 min)"
+echo "    NOTE: SPIEC-EASI-glasso is O(p^3) and is the wall-clock bottleneck;"
+echo "          we cap at p=1000 by default to keep total runtime under 1 h."
+"$PY" "$RUNNER" --task method_comparison --workers "$WORKERS" --reps 5 \
+    --n 500 1000 \
+    --p 500 1000 \
     --rho 0.7
 
-echo "==> [4/5] cross_domain  (CrossNet vs SparXCC base/iter vs SPIEC-EASI-cross vs naive CLR)"
-"$PY" "$RUNNER" --task cross_domain --workers "$WORKERS" --reps 20 \
+echo "==> [4/5] cross_domain  (5 methods, planted phage-bacteria; ~10 min)"
+"$PY" "$RUNNER" --task cross_domain --workers "$WORKERS" --reps 10 \
     --cross-n 300 --cross-p 500 --cross-q 500 --cross-edges 50
 
-echo "==> [5/5] fdr_control  (analytic Fisher-z + BH-FDR calibration)"
-"$PY" "$RUNNER" --task fdr_control --workers "$WORKERS" --reps 30 \
+echo "==> [5/5] fdr_control  (FastProp BH-FDR calibration; ~5 min)"
+"$PY" "$RUNNER" --task fdr_control --workers "$WORKERS" --reps 15 \
     --fdr-n 2000 --fdr-p 500 \
     --alpha 0.01 0.05 0.10 0.20
 
