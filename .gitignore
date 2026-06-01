@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# LaTeX build artifacts (PDFs are kept; intermediate files are not)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+
+# Project-specific
+benchmarks/__pycache__/
+manuscript/figures/__pycache__/
+src/falcon/__pycache__/
+
+# Anything generated to /tmp is not part of the repo
+
+# Local reference papers (copyrighted journal PDFs, do not redistribute)
+ref/
+
+# Figure raster/vector previews (regenerable from manuscript/figures/*.py).
+# The .pdf versions are kept because the LaTeX main.tex includes them.
+manuscript/figures/*.png
+manuscript/figures/*.svg
