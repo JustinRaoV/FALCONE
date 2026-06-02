@@ -19,6 +19,20 @@ class CandidateSet:
 
 
 @dataclass(frozen=True)
+class CrossCandidateSet:
+    pairs: np.ndarray
+    scores: np.ndarray
+    top_k: int
+    n_features_x: int
+    n_features_y: int
+
+    @property
+    def density(self) -> float:
+        possible = self.n_features_x * self.n_features_y
+        return self.pairs.shape[0] / possible
+
+
+@dataclass(frozen=True)
 class EdgeTable:
     pairs: np.ndarray
     scores: np.ndarray
