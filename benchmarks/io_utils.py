@@ -1,24 +1,16 @@
-"""
-CSV I/O for FALCON benchmarks and figures.
+"""CSV I/O for Falcon-SR feasibility benchmarks.
 
-We use CSV (not JSON) as the data-exchange format so that:
-  * benchmark results can be computed remotely (e.g. on a HPC cluster
-    with multiprocessing), `scp`-ed back, and consumed directly;
-  * partial results are human-readable and easy to inspect;
-  * `pandas.read_csv` makes plotting code trivial.
+Two canonical tables, one per inference family, under ``data/`` at the
+repository root:
 
-There are four canonical tables, each in ``data/`` at the repository root:
+  data/falcon_sr_single_feasibility.csv
+  data/falcon_sr_cross_feasibility.csv
 
-  data/scalability.csv     n, p, fastprop_sec, randprop_sec, host
-  data/detection.csv       n, p, effect, n_reps, power_mean, power_std,
-                           auroc_mean, auroc_std, recall_at_K_mean,
-                           recall_at_K_std
-  data/fdr_control.csv     alpha, scenario, n_reps, fpr_mean, fpr_std,
-                           fdr_mean, fdr_std
-  data/cross_domain.csv    method, replicate, corr, bias, sign_acc,
-                           sensitivity, specificity
-
-All times are seconds. All fractions are in [0, 1].
+All times are seconds; all fractions are in [0, 1]; peak memory is bytes
+from ``tracemalloc.get_traced_memory``. Each row is a single
+(method, cell, replicate) measurement so downstream aggregation can stay
+in pandas-or-equivalent territory rather than baking summary statistics
+into the CSV schema.
 """
 
 from __future__ import annotations
@@ -32,45 +24,32 @@ DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 
-# Canonical column orders — keep stable so figures don't break when CSVs are
-# regenerated on the server.
 COLUMNS = {
-    "scalability": ["n", "p", "fastprop_sec", "sparcc_sec",
-                    "randprop_sec", "host"],
-    "detection": [
-        "n", "p", "effect", "n_reps",
-        "power_mean", "power_std",
-        "auroc_mean", "auroc_std",
-        "recall_at_K_mean", "recall_at_K_std",
+    "falcon_sr_single_feasibility": [
+        "method", "replicate", "n", "p", "density", "top_k",
+        "candidate_count", "candidate_recall",
+        "edge_overlap_vs_sparcc", "sign_accuracy_vs_truth",
+        "auroc_vs_truth", "recall_at_K_vs_truth",
+        "wallclock_seconds", "peak_bytes",
+        "fallback_reason", "calibration_method",
     ],
-    "fdr_control": [
-        "alpha", "scenario", "n_reps", "fpr_mean", "fpr_std",
-        "fdr_mean", "fdr_std",
-    ],
-    "cross_domain": [
-        "method", "replicate",
-        "corr", "bias", "sign_acc",
-        "sensitivity", "specificity",
-    ],
-    "method_comparison": [
-        "method", "n", "p", "effect", "n_reps",
-        "time_sec_mean", "time_sec_std",
-        "auroc_mean", "auroc_std",
-        "recall_at_K_mean", "recall_at_K_std",
-        "null_bias_mean", "null_bias_std",
+    "falcon_sr_cross_feasibility": [
+        "method", "replicate", "n", "p", "q", "density", "top_k",
+        "candidate_count", "candidate_recall",
+        "edge_overlap_vs_sparxcc_iter", "sign_accuracy_vs_truth",
+        "auroc_vs_truth", "recall_at_K_vs_truth",
+        "wallclock_seconds", "peak_bytes",
+        "fallback_reason", "calibration_method",
+        "prior_count", "data_disagreed_with_prior_count",
     ],
 }
 
 
 def write_table(table_name: str, rows: Iterable[dict]) -> Path:
-    """Write `rows` to `data/<table_name>.csv` with the canonical column order.
-
-    Missing keys become empty strings; extra keys are ignored. Existing file
-    is overwritten.
-    """
     if table_name not in COLUMNS:
-        raise KeyError(f"Unknown table {table_name!r}; "
-                       f"expected one of {sorted(COLUMNS)}")
+        raise KeyError(
+            f"Unknown table {table_name!r}; expected one of {sorted(COLUMNS)}"
+        )
     cols = COLUMNS[table_name]
     out_path = DATA_DIR / f"{table_name}.csv"
     with out_path.open("w", newline="") as fh:
@@ -82,10 +61,6 @@ def write_table(table_name: str, rows: Iterable[dict]) -> Path:
 
 
 def read_table(table_name: str) -> list[dict]:
-    """Read `data/<table_name>.csv` and return a list of dicts with float
-    coercion of numeric columns. Returns [] if the file does not exist
-    (so figure scripts gracefully degrade when a benchmark hasn't been run).
-    """
     if table_name not in COLUMNS:
         raise KeyError(f"Unknown table {table_name!r}")
     path = DATA_DIR / f"{table_name}.csv"
@@ -109,11 +84,6 @@ def read_table(table_name: str) -> list[dict]:
 
 
 def append_row(table_name: str, row: dict) -> Path:
-    """Append a single row; create file with header if it doesn't exist.
-
-    Useful for rolling saves from long-running benchmarks: every cell that
-    finishes is durable, even if the job is killed.
-    """
     if table_name not in COLUMNS:
         raise KeyError(f"Unknown table {table_name!r}")
     cols = COLUMNS[table_name]
