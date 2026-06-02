@@ -1,200 +1,120 @@
-# FALCONE
+# Falcon-SR
 
-**F**ast **A**lgorithm for **L**arge-scale **C**ross-domain comp**O**sitional **N**etwork inf**E**rence.
+**Falcon-SR** is a screen-refine algorithm for inferring latent log-abundance
+Pearson correlations from compositional sequencing data. It targets the same
+estimand as SparCC (single-domain) and SparXCC Case-C (cross-domain) but
+reaches it through a sparse pipeline: a SparCC-compatible dense base score, a
+top-k candidate union, and a sparse refinement that updates only candidate-
+incident equations. Optional permutation calibration produces approximate
+p-values; optional signed biological priors enter as a candidate injection
+plus an analytic post-hoc shrinkage.
 
-Three algorithms for microbiome / phage–bacteria network inference from
-compositional sequencing data:
+This repository implements Falcon-SR end-to-end (`src/falcon/`), reproduces it
+against external baselines (`benchmarks/`), and documents the design
+(`docs/superpowers/specs/`).
 
-| Algorithm   | Purpose                                                 | Complexity                    |
-|-------------|---------------------------------------------------------|-------------------------------|
-| `fastprop`  | Single-domain proportionality with Ledoit–Wolf shrinkage | $O(np^2)$, one BLAS GEMM      |
-| `randprop`  | Genome-scale screening via JL random projection          | $O(np \log p / \varepsilon^2)$ |
-| `crossnet`  | Cross-domain bias-corrected network (FISTA)              | $O(npq + Kpq)$, $K\le 20$     |
-
-See `manuscript/main.pdf` for the full paper.
-
----
-
-## Repository layout
-
-```
-FALCONE/
-├── src/falcon/__init__.py     # Library: the three algorithms (~820 LOC)
-├── benchmarks/
-│   ├── run_on_server.py       # Multi-process benchmark runner -> data/*.csv
-│   ├── comparison_methods.py  # SparCC (py) + Pearson(CLR/raw) baselines
-│   └── io_utils.py            # CSV table I/O helpers
-├── data/                      # Canonical experimental results (CSV tables)
-│   ├── scalability.csv        # FastProp / RandProp wall-clock (n, p, sec)
-│   ├── detection.csv          # power / AUROC / Recall@K vs (n, p, rho)
-│   ├── method_comparison.csv  # head-to-head: FastProp / SparCC / Pearson(x2)
-│   ├── cross_domain.csv       # per-replicate metrics for 3 methods
-│   └── fdr_control.csv        # type-I error / FDR calibration
-├── manuscript/
-│   ├── main.tex / main.pdf    # Paper (single-column, 11 pt)
-│   ├── references.bib
-│   ├── figures/               # generate_*.py reads data/*.csv -> fig{1..3}
-│   └── supplementary/         # supplementary.tex / supplementary.pdf
-├── docs/
-│   ├── methodology.md         # Internal design notes (Chinese)
-│   └── decision-log.md        # Project history / trade-offs
-├── pyproject.toml             # Python package metadata
-└── README.md
-```
-
-Every figure in the paper is regenerated from a CSV table in `data/`.
-Every CSV table can be regenerated from scratch by `run_on_server.py`.
+> Status: experimental. The single- and cross-domain APIs are implemented
+> and feasibility-tested; the published acceptance gates in the design
+> specification must be satisfied by a full benchmark run before the
+> method is presented as validated.
 
 ---
 
 ## Quickstart
 
-### 1. Install (uv)
-
-We use [`uv`](https://github.com/astral-sh/uv) for environment + dependency
-management. From a fresh clone:
-
 ```bash
-git clone https://github.com/JustinRaoV/FALCONE.git && cd FALCONE
-uv sync                         # runtime deps only (numpy/scipy/scikit-learn) — for the server
-uv sync --extra figures         # +matplotlib (for figure scripts) — for the laptop
+uv sync
+uv run pytest -q
 ```
-
-`uv` will pick a CPython in the range `>=3.10,<3.13` (Python 3.13 wheels
-for the scientific stack are still incomplete as of early 2025). To run
-any command inside the project environment, prefix it with `uv run`,
-e.g.\ `uv run python manuscript/figures/generate_fig1.py`.
-
-Common fixes for shared HPC nodes:
-- **PyPI TLS rejection:** add `--native-tls` (`uv sync --native-tls`)
-- **No wheel for an old compiler (e.g.\ contourpy needs C++17, but GCC
-  4.8.5 on RHEL 7 only goes to C++14):** `uv sync` already skips the
-  `figures` extra by default, and `pyproject.toml` declares
-  `no-build-package = [numpy, scipy, scikit-learn, matplotlib, ...]`
-  so heavy packages are never compiled from source.
-
-If you prefer plain pip, `python -m venv .venv && source .venv/bin/activate
-&& pip install -e .` works equivalently.
-
-### 2. Use the library
 
 ```python
-from falcon import fastprop, randprop, crossnet, extract_network
+import numpy as np
+from falcon import infer_single, infer_cross, PriorEdge
 
-# Single-domain (small p)
-rho = fastprop(counts, shrinkage=True)         # (p, p) proportionality
-pvals = fastprop_pvalues(counts, rho)          # Fisher-z p-values
-edges = extract_network(rho, pvals, alpha=0.05)
+rng = np.random.default_rng(0)
 
-# Single-domain (very large p)
-sparse_net = randprop(counts, k=50)            # top-k per node
+# Single-domain inference
+counts = rng.integers(1, 200, size=(100, 50))
+result = infer_single(
+    counts,
+    mode="fast",
+    top_k=10,
+    calibration="permutation",
+    n_permutations=100,
+    seed=0,
+)
+print(result.edges.pairs.shape, result.edges.scores[:5])
+print("approx q-values:", result.edges.qvalue_approx[:5])
 
-# Cross-domain (phage X, bacteria Y)
-C, pvals = crossnet(X, Y, method='bias_corrected')
+# Cross-domain inference with optional signed biological prior
+counts_x = rng.integers(1, 200, size=(100, 50))
+counts_y = rng.integers(1, 200, size=(100, 60))
+priors = [
+    PriorEdge(source_feature=3, target_feature=12,
+              expected_sign=-1, confidence=0.8,
+              provenance="crispr_spacer"),
+]
+cross = infer_cross(
+    counts_x, counts_y,
+    mode="fast", top_k=10,
+    prior=priors, prior_weight=0.5,
+    calibration="permutation", n_permutations=100, seed=0,
+)
+print(cross.edges.pairs.shape, cross.edges.scores[:5])
 ```
 
-### 3. Reproduce the figures
+`infer_single` and `infer_cross` both return a `NetworkResult` with:
 
-The CSVs in `data/` are already populated from the simulation runs that
-back the paper. To regenerate the figures from those CSVs:
-
-```bash
-uv run python manuscript/figures/generate_fig1.py
-uv run python manuscript/figures/generate_fig2.py
-```
-
-To recompile the paper:
-
-```bash
-cd manuscript && pdflatex main && bibtex main && pdflatex main && pdflatex main
-```
-
-### 4. (Optional) Install FastSpar for a real wall-clock head-to-head
-
-Our `data/scalability.csv` includes an *estimated* SparCC line and
-estimated FastSpar lines derived from the speedups reported in
-Watts et al. (2019). To replace these with measured wall-clock times,
-install FastSpar on a Linux server with conda available:
-
-```bash
-conda install -c bioconda fastspar          # easiest path
-```
-
-We tried compiling FastSpar from source on macOS (Apple Silicon) but
-the current `homebrew armadillo` (15.x) requires C++14 while the
-FastSpar autotools build defaults to C++11; resolving this requires
-patching `src/Makefile.am`. The path of least resistance is a Linux
-host with bioconda, which is what we recommend for the real-data
-benchmarks anyway.
-
-Once `fastspar` is in `$PATH`, run it on a planted-edge OTU table
-generated by `benchmarks/run_on_server.py` and append a row to
-`data/scalability.csv` with `host=fastspar-server`. The figure-generation
-script will pick up the measured times automatically.
-
-### 5. Re-run the benchmarks (server)
-
-`benchmarks/run_all.sh` is the canonical one-line entry point. It runs
-all five benchmark tasks in sequence with sensible grids and tars up the
-results:
-
-```bash
-git clone https://github.com/JustinRaoV/FALCONE.git && cd FALCONE && \
-    uv sync && uv run bash benchmarks/run_all.sh 16
-```
-
-Sub-tasks can be re-run individually with `uv run python benchmarks/run_on_server.py
---task {scalability,detection,method_comparison,cross_domain,fdr_control}`;
-each writes incrementally to `data/<task>.csv` so a killed job loses at
-most the in-flight cell. Each row in `data/scalability.csv` records the
-`host` (`socket.gethostname()`) so multiple machines can contribute
-measurements to the same file.
+- `edges.pairs` — `(n_edges, 2)` array of `(i, j)` feature indices
+  (canonical `i < j` for single-domain; `i ∈ X, j ∈ Y` for cross-domain)
+- `edges.scores` — refined Pearson correlation per edge
+- `edges.pvalue_approx`, `edges.qvalue_approx` — populated only when
+  `calibration="permutation"`
+- `diagnostics` — adaptive growth metadata, candidate density, prior
+  bookkeeping, and the explicit calibration method tag
+- `initial_matrix` — full dense matrix when `mode="strict"`, else `None`
+- `calibration` — `CalibrationResult` with the full null distribution,
+  or `None` when `calibration="none"`
 
 ---
 
-## Data exchange contract
+## Feasibility benchmarks
 
-The four CSV tables in `data/` are the single source of truth that
-figures depend on. Their schemas are defined in `benchmarks/io_utils.py`:
+The repository ships two benchmark runners. They write per-method-per-cell
+rows to `data/falcon_sr_*_feasibility.csv`.
 
-| File                     | Key columns                          | Value columns                                                            |
-|--------------------------|--------------------------------------|--------------------------------------------------------------------------|
-| `scalability.csv`        | `n`, `p`, `host`                     | `fastprop_sec`, `randprop_sec`                                            |
-| `detection.csv`          | `n`, `p`, `effect`                   | `power_{mean,std}`, `auroc_{mean,std}`, `recall_at_K_{mean,std}`, `n_reps` |
-| `method_comparison.csv`  | `method`, `n`, `p`, `effect`         | `time_sec_{mean,std}`, `auroc_{mean,std}`, `recall_at_K_{mean,std}`, `null_bias_{mean,std}` |
-| `fdr_control.csv`        | `alpha`, `scenario`                  | `fpr_{mean,std}`, `fdr_{mean,std}`, `n_reps`                              |
-| `cross_domain.csv`       | `method`, `replicate`                | `corr`, `bias`, `sign_acc`, `sensitivity`, `specificity`                  |
+```bash
+# Single-domain feasibility grid
+uv run python benchmarks/falcon_sr_single.py \
+    --n 100 500 --p 100 500 1000 --top-k 10 25 50 --reps 3
 
-Replace any of these files with results from a remote run and the
-figures rebuild without changes elsewhere.
+# Cross-domain feasibility grid (SparXCC Case-C style simulator)
+uv run python benchmarks/falcon_sr_cross.py \
+    --n 100 500 --pq 100,100 500,500 --top-k 10 25 --reps 3
+
+# Run both with defaults
+./benchmarks/run_all.sh
+```
+
+Each cell runs Falcon-SR alongside SparCC / SparXCC base / SparXCC iter /
+Pearson(CLR) and reports candidate recall, edge overlap, sign accuracy,
+AUROC, Recall@K, wall-clock, and peak memory. The runners write rows as
+each method finishes, so partial output is durable.
 
 ---
 
-## Key results (current data)
+## Design
 
-| Setting                                                 | Metric                              | Value           |
-|---------------------------------------------------------|-------------------------------------|-----------------|
-| FastProp at $n=500$, $p=5{,}000$                                  | Wall-clock (single CPU)         | 0.42 s            |
-| FastProp at $n=2{,}000$, $p=10{,}000$                             | Wall-clock                      | 11 s              |
-| FastProp at $p=100$, $n=500$, $\rho=0.4$                          | Power (BH-FDR $<0.05$)          | 0.99              |
-| FastProp at $p=500$, $n=5{,}000$, $\rho=0.7$                      | AUROC                           | 1.00              |
-| FastProp at $p=1{,}000$, $n=5{,}000$, $\rho=0.7$                  | AUROC                           | 0.83              |
-| FastProp vs SparCC (head-to-head, $p\le 1000$)                    | AUROC parity within             | $\pm 0.005$       |
-| FastProp vs SparCC at $p=1000$, $n=1000$, $\rho=0.7$              | Recall@$K$ (shrinkage benefit)  | 0.30 vs 0.10      |
-| Pearson on raw proportions (any cell)                             | Mean |null bias| (closure)      | 0.048             |
-| FastProp / SparCC / Pearson on CLR (any cell)                     | Mean |null bias|                | $\le 0.006$       |
-| CrossNet vs naive CLR (phage–bacteria, $n=300$)                   | False-positive rate reduction   | $\sim$26% rel.    |
+- `docs/superpowers/specs/2026-06-01-falcon-sr-design.md` — algorithmic
+  specification (single + cross + priors + calibration).
+- `docs/superpowers/specs/2026-06-02-falcon-sr-rewrite-execution-design.md`
+  — execution / migration design that captures the cross-domain refinement
+  geometry, prior closed form, and base-only permutation approximation.
+- `docs/methodology.md` — narrative method description.
+- `docs/decision-log.md` — design decisions and their motivation.
 
 ---
 
 ## License
 
-MIT. See `LICENSE` once added.
-
-## Citation
-
-```
-[TO FILL: BibTeX once published]
-Jun Rao, Xiao Liang. FALCONE: Fast Algorithm for Large-scale Cross-domain
-Compositional Network Inference. (In preparation, 2025/2026.)
-```
+MIT. See `pyproject.toml`.
