@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -36,6 +36,8 @@ class CrossCandidateSet:
 class EdgeTable:
     pairs: np.ndarray
     scores: np.ndarray
+    pvalue_approx: np.ndarray | None = None
+    qvalue_approx: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,13 @@ class ScreenDiagnostics:
     overlap_across_budgets: float
     sign_stability_across_budgets: float
     fallback_reason: str | None
+    calibration_method: str | None = None
+    n_permutations: int | None = None
+    pruned_x_count: int | None = None
+    pruned_y_count: int | None = None
+    fallback_to_base_centering: bool | None = None
+    prior_count: int | None = None
+    data_disagreed_with_prior_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -55,3 +64,4 @@ class NetworkResult:
     edges: EdgeTable
     diagnostics: ScreenDiagnostics
     initial_matrix: np.ndarray | None
+    calibration: object | None = None

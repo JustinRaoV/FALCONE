@@ -832,3 +832,5 @@ def _benjamini_hochberg(pvalues: np.ndarray, alpha: float) -> np.ndarray:
 # Experimental Falcon-SR API. Legacy prototype functions remain exported while
 # the screen-refine research gates are being evaluated.
 from falcon.single import infer_single
+from falcon.cross import infer_cross
+from falcon.prior import PriorEdge

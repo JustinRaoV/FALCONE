@@ -6,6 +6,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, cg
 
+from falcon.calibration import calibrate_single
 from falcon.preprocessing import PreprocessReport, prepare_log_composition
 from falcon.screen import edge_overlap, single_candidates
 from falcon.types import (
@@ -72,8 +73,10 @@ def correlations_from_basis(
     return correlation
 
 
-def single_base_score(counts: np.ndarray) -> SingleBaseResult:
-    prepared = prepare_log_composition(counts)
+def single_base_score(
+    counts: np.ndarray, *, zero_policy: str = "multiplicative"
+) -> SingleBaseResult:
+    prepared = prepare_log_composition(counts, zero_policy=zero_policy)
     variation = variation_matrix(prepared.log_composition)
     basis_variance = solve_basis_variance_dense(variation)
     correlation = correlations_from_basis(variation, basis_variance)
@@ -251,6 +254,37 @@ def _strong_edges(edges: EdgeTable, limit: int) -> EdgeTable:
     return EdgeTable(pairs=edges.pairs[indices], scores=edges.scores[indices])
 
 
+def _attach_calibration(
+    pairs: np.ndarray,
+    scores: np.ndarray,
+    counts: np.ndarray,
+    calibration: str,
+    n_permutations: int,
+    seed: int,
+) -> tuple[EdgeTable, object | None, str | None, int | None]:
+    if calibration in ("none", None):
+        return (
+            EdgeTable(pairs=pairs, scores=scores),
+            None,
+            None,
+            None,
+        )
+    if calibration != "permutation":
+        raise ValueError(
+            f"calibration must be 'permutation' or 'none'; got {calibration!r}"
+        )
+    cal = calibrate_single(
+        counts, pairs, scores,
+        n_permutations=n_permutations, seed=seed,
+    )
+    edges = EdgeTable(
+        pairs=pairs, scores=scores,
+        pvalue_approx=cal.pvalue_approx,
+        qvalue_approx=cal.qvalue_approx,
+    )
+    return edges, cal, cal.method, cal.n_permutations
+
+
 def infer_single(
     counts: np.ndarray,
     *,
@@ -261,9 +295,14 @@ def infer_single(
     exclusion_threshold: float = 0.1,
     max_exclusions: int = 10,
     stability_threshold: float = 0.95,
+    zero_policy: str = "multiplicative",
+    calibration: str | None = "permutation",
+    n_permutations: int = 100,
+    seed: int = 0,
 ) -> NetworkResult:
-    base = single_base_score(counts)
+    base = single_base_score(counts, zero_policy=zero_policy)
     p = base.correlation.shape[0]
+
     if mode == "strict":
         strict = strict_refine_single(
             base.variation,
@@ -272,8 +311,12 @@ def infer_single(
         )
         rows, cols = np.triu_indices(p, k=1)
         pairs = np.column_stack([rows, cols])
+        scores = strict.correlation[rows, cols]
+        edges, cal, cal_method, cal_n = _attach_calibration(
+            pairs, scores, counts, calibration, n_permutations, seed,
+        )
         return NetworkResult(
-            edges=EdgeTable(pairs=pairs, scores=strict.correlation[rows, cols]),
+            edges=edges,
             diagnostics=ScreenDiagnostics(
                 initial_top_k=p - 1,
                 final_top_k=p - 1,
@@ -283,8 +326,11 @@ def infer_single(
                 overlap_across_budgets=1.0,
                 sign_stability_across_budgets=1.0,
                 fallback_reason=None,
+                calibration_method=cal_method,
+                n_permutations=cal_n,
             ),
             initial_matrix=strict.correlation,
+            calibration=cal,
         )
     if mode != "fast":
         raise ValueError("mode must be 'fast' or 'strict'")
@@ -311,10 +357,10 @@ def infer_single(
             exclusion_threshold=exclusion_threshold,
             max_exclusions=max_exclusions,
         )
-        edges = EdgeTable(pairs=refined.pairs, scores=refined.scores)
+        edges_raw = EdgeTable(pairs=refined.pairs, scores=refined.scores)
         if previous is not None:
             previous_strong = _strong_edges(previous, strong_edge_limit)
-            current_strong = _strong_edges(edges, strong_edge_limit)
+            current_strong = _strong_edges(edges_raw, strong_edge_limit)
             overlap = edge_overlap(previous_strong.pairs, current_strong.pairs)
             sign_stability = _sign_stability(previous_strong, current_strong)
             if (
@@ -325,9 +371,14 @@ def infer_single(
         if budget >= max_top_k:
             fallback_reason = "candidate budget reached before stability"
             break
-        previous = edges
+        previous = edges_raw
         budget = min(2 * budget, max_top_k)
         growth_rounds += 1
+
+    edges, cal, cal_method, cal_n = _attach_calibration(
+        refined.pairs, refined.scores,
+        counts, calibration, n_permutations, seed,
+    )
 
     return NetworkResult(
         edges=edges,
@@ -340,6 +391,9 @@ def infer_single(
             overlap_across_budgets=overlap,
             sign_stability_across_budgets=sign_stability,
             fallback_reason=fallback_reason,
+            calibration_method=cal_method,
+            n_permutations=cal_n,
         ),
         initial_matrix=None,
+        calibration=cal,
     )
