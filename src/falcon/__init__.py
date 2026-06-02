@@ -20,6 +20,19 @@ algorithmic specification and ``docs/superpowers/specs/2026-06-02-falcon-sr-rewr
 for the execution / migration details.
 """
 
+import warnings as _warnings
+
+# macOS Accelerate + NumPy 2.x emits spurious "matmul" RuntimeWarnings on
+# valid finite inputs. Silence the false positive at import time so users
+# see real numerical warnings instead of platform noise. Real numerical
+# issues remain visible through explicit isfinite assertions in the code.
+for _msg in (
+    "divide by zero encountered in matmul",
+    "overflow encountered in matmul",
+    "invalid value encountered in matmul",
+):
+    _warnings.filterwarnings("ignore", message=_msg, category=RuntimeWarning)
+
 from falcon.cross import infer_cross
 from falcon.prior import PriorEdge
 from falcon.single import infer_single

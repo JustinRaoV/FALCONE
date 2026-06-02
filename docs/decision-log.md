@@ -104,6 +104,42 @@ they appear even for completely finite matrices and obscure real
 diagnostic output. Real numerical issues remain visible through explicit
 `np.isfinite` checks.
 
+## 2026-06-02 feasibility benchmark findings
+
+Run: 3 reps per cell, host = local laptop, BLAS = Accelerate, see
+`data/falcon_sr_single_feasibility.csv` and
+`data/falcon_sr_cross_feasibility.csv`.
+
+**Cross-domain** (the headline finding):
+- `edge_overlap_vs_sparxcc_iter ≥ 0.984` on all 8 cells (spec gate 0.95 ✓).
+- `sign_accuracy_vs_truth = 1.000` on all cells (spec gate 0.95 ✓).
+- AUROC vs planted truth ≥ 0.87.
+- Optional prior consistently improves the hard n=100, (p, q)=(500, 500)
+  cell: candidate recall 0.756 → 0.873, AUROC 0.868 → 0.927; no regression
+  on easy cells.
+
+**Single-domain**:
+- `edge_overlap_vs_sparcc ≥ 0.95` on every cell except (n=100, p=1000),
+  where both SparCC and Falcon-SR fall to chance because n is too small
+  to estimate ~10⁴ planted correlations. (n=500, p=1000) reaches
+  `edge_overlap_vs_sparcc = 0.998` at top_k=50.
+- Sign accuracy = 1.000 on all (n ≥ 100, p ≤ 500) cells; drops to ~0.55 on
+  (n=100, p=1000) — again driven by the underdetermined regime, not by
+  the algorithm.
+
+**Wall-clock at p ≤ 1000**:
+- Falcon-SR fast (no calibration): 0.01–0.10 s.
+- Falcon-SR fast + permutation calibration (R=100): 1.6 s.
+- SparCC (single closed-form GEMM): 0.008 s.
+- Falcon-SR strict (reference SparCC exclusion path): 0.10–0.13 s.
+
+The dense base GEMM dominates at these sizes, so Falcon-SR fast is
+~10× slower than SparCC's closed form here. This matches spec §19 risk 2;
+the screen-refine speedup is expected to appear above p ≈ 5000 where
+SparCC's refinement loop becomes the bottleneck. Random-projection
+screening (spec §3 non-goal for this release) would be the path to push
+into that regime.
+
 ## Open questions
 
 - **Selective-inference correction for candidate-only calibration.** Spec
