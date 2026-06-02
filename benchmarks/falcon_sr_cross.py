@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT / "benchmarks"))
 
 from comparison_methods import sparxcc_base, sparxcc_iter  # noqa: E402
 from falcon import infer_cross  # noqa: E402
+from falcon.preprocessing import prepare_log_composition  # noqa: E402
 from falcon.prior import PriorEdge  # noqa: E402
 from io_utils import append_row  # noqa: E402
 from sim import generate_cross_domain  # noqa: E402
@@ -193,11 +194,27 @@ def run_cell(*, n: int, p: int, q: int, density: float, top_k: int, reps: int):
     for replicate in range(reps):
         seed = 2000 + replicate + p + q
         rng = np.random.default_rng(seed)
-        counts_x, counts_y, _, planted = generate_cross_domain(
+        raw_x, raw_y, _, planted = generate_cross_domain(
             rng, n, p, q, density=density,
         )
-        planted_pairs = {(i, k) for i, k, _ in planted}
-        planted_signs = {(i, k): np.sign(s) for i, k, s in planted}
+        # Pre-filter both domains so every method sees the same feature set
+        # and remap planted edges to surviving indices.
+        prep_x = prepare_log_composition(raw_x)
+        prep_y = prepare_log_composition(raw_y)
+        counts_x = raw_x[:, prep_x.report.kept_indices]
+        counts_y = raw_y[:, prep_y.report.kept_indices]
+        p_kept = counts_x.shape[1]
+        q_kept = counts_y.shape[1]
+        map_x = {int(old): new for new, old in enumerate(prep_x.report.kept_indices.tolist())}
+        map_y = {int(old): new for new, old in enumerate(prep_y.report.kept_indices.tolist())}
+        planted_pairs = set()
+        planted_signs: dict[tuple[int, int], float] = {}
+        for i, k, s in planted:
+            if i not in map_x or k not in map_y:
+                continue
+            key = (map_x[i], map_y[k])
+            planted_pairs.add(key)
+            planted_signs[key] = np.sign(s)
         n_planted = len(planted_pairs)
         if n_planted == 0:
             continue
@@ -214,7 +231,7 @@ def run_cell(*, n: int, p: int, q: int, density: float, top_k: int, reps: int):
         out.append(_row(
             method="sparxcc_iter", replicate=replicate,
             n=n, p=p, q=q, density=density, top_k=top_k,
-            candidate_count=p * q, candidate_recall=1.0,
+            candidate_count=p_kept * q_kept, candidate_recall=1.0,
             overlap=1.0, sign_acc=iter_sign_acc,
             auroc=_auroc_from_dense(iter_matrix, planted_pairs),
             recall=_recall_dense(iter_matrix, planted_pairs, n_planted),
@@ -234,7 +251,7 @@ def run_cell(*, n: int, p: int, q: int, density: float, top_k: int, reps: int):
         out.append(_row(
             method="sparxcc_base", replicate=replicate,
             n=n, p=p, q=q, density=density, top_k=top_k,
-            candidate_count=p * q, candidate_recall=1.0,
+            candidate_count=p_kept * q_kept, candidate_recall=1.0,
             overlap=_jaccard(base_strong, iter_strong),
             sign_acc=base_sign_acc,
             auroc=_auroc_from_dense(base_matrix, planted_pairs),
@@ -262,7 +279,7 @@ def run_cell(*, n: int, p: int, q: int, density: float, top_k: int, reps: int):
             overlap=_jaccard(fast_strong, iter_strong),
             sign_acc=_sign_acc(fast_res.edges.pairs, fast_res.edges.scores, planted_signs),
             auroc=_auroc_from_edges(
-                fast_res.edges.pairs, fast_res.edges.scores, planted_pairs, p, q
+                fast_res.edges.pairs, fast_res.edges.scores, planted_pairs, p_kept, q_kept
             ),
             recall=_recall_at_k_edges(
                 fast_res.edges.pairs, fast_res.edges.scores, planted_pairs, n_planted
@@ -304,7 +321,7 @@ def run_cell(*, n: int, p: int, q: int, density: float, top_k: int, reps: int):
             overlap=_jaccard(prior_strong, iter_strong),
             sign_acc=_sign_acc(prior_res.edges.pairs, prior_res.edges.scores, planted_signs),
             auroc=_auroc_from_edges(
-                prior_res.edges.pairs, prior_res.edges.scores, planted_pairs, p, q
+                prior_res.edges.pairs, prior_res.edges.scores, planted_pairs, p_kept, q_kept
             ),
             recall=_recall_at_k_edges(
                 prior_res.edges.pairs, prior_res.edges.scores, planted_pairs, n_planted
@@ -337,7 +354,7 @@ def run_cell(*, n: int, p: int, q: int, density: float, top_k: int, reps: int):
             overlap=_jaccard(cal_strong, iter_strong),
             sign_acc=_sign_acc(cal_res.edges.pairs, cal_res.edges.scores, planted_signs),
             auroc=_auroc_from_edges(
-                cal_res.edges.pairs, cal_res.edges.scores, planted_pairs, p, q
+                cal_res.edges.pairs, cal_res.edges.scores, planted_pairs, p_kept, q_kept
             ),
             recall=_recall_at_k_edges(
                 cal_res.edges.pairs, cal_res.edges.scores, planted_pairs, n_planted

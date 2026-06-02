@@ -39,6 +39,7 @@ sys.path.insert(0, str(ROOT / "benchmarks"))
 
 from comparison_methods import pearson_clr, sparcc_py  # noqa: E402
 from falcon import infer_single  # noqa: E402
+from falcon.preprocessing import prepare_log_composition  # noqa: E402
 from io_utils import append_row  # noqa: E402
 from sim import generate_basis_correlation, generate_single_domain  # noqa: E402
 
@@ -109,13 +110,28 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
         seed = 1000 + replicate + p
         rng = np.random.default_rng(seed)
         sigma, planted = generate_basis_correlation(rng, p, density)
-        counts = generate_single_domain(rng, n, p, sigma)
-        planted_pairs = {
-            (min(i, j), max(i, j)) for i, j, _ in planted
-        }
-        planted_signs = {
-            (min(i, j), max(i, j)): np.sign(rho) for i, j, rho in planted
-        }
+        raw_counts = generate_single_domain(rng, n, p, sigma)
+
+        # Pre-filter once via the same preprocessing Falcon-SR uses, so every
+        # method sees the same feature set. Then remap planted edges to the
+        # surviving index space. Without this step, Falcon-SR is penalised on
+        # cells where a few features fall below the detection limit because
+        # those columns are dropped but the SparCC/Pearson baselines were
+        # implicitly handling them differently.
+        prepared = prepare_log_composition(raw_counts)
+        kept = prepared.report.kept_indices
+        counts = raw_counts[:, kept]
+        p_kept = counts.shape[1]
+        index_map = {int(old): new for new, old in enumerate(kept.tolist())}
+        planted_pairs = set()
+        planted_signs: dict[tuple[int, int], float] = {}
+        for i, j, rho in planted:
+            if i not in index_map or j not in index_map:
+                continue
+            ni, nj = index_map[i], index_map[j]
+            key = (min(ni, nj), max(ni, nj))
+            planted_pairs.add(key)
+            planted_signs[key] = np.sign(rho)
         n_planted = len(planted_pairs)
         if n_planted == 0:
             continue
@@ -123,7 +139,7 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
         # Reference: SparCC base score, ranked
         sparcc_matrix, t_sparcc, peak_sparcc = _timed(lambda: sparcc_py(counts))
         sparcc_strong = _strong_pairs_from_matrix(sparcc_matrix, n_planted)
-        rows, cols = np.triu_indices(p, k=1)
+        rows, cols = np.triu_indices(p_kept, k=1)
         sparcc_scores_flat = np.abs(sparcc_matrix[rows, cols])
         labels = np.zeros(rows.size, dtype=np.int8)
         for idx, (i, j) in enumerate(zip(rows.tolist(), cols.tolist())):
@@ -142,7 +158,7 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
         out.append(_row(
             method="sparcc_py", replicate=replicate, n=n, p=p,
             density=density, top_k=top_k,
-            candidate_count=p * (p - 1) // 2,
+            candidate_count=p_kept * (p_kept - 1) // 2,
             candidate_recall=1.0,
             overlap=1.0, sign_acc=sparcc_sign_acc,
             auroc=sparcc_auroc, recall=sparcc_recall,
@@ -167,7 +183,7 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
         out.append(_row(
             method="pearson_clr", replicate=replicate, n=n, p=p,
             density=density, top_k=top_k,
-            candidate_count=p * (p - 1) // 2,
+            candidate_count=p_kept * (p_kept - 1) // 2,
             candidate_recall=1.0,
             overlap=pearson_overlap, sign_acc=pearson_sign_acc,
             auroc=pearson_auroc, recall=pearson_recall,
@@ -191,7 +207,7 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
             candidate_recall=_recall_planted(strict_pairs, planted_pairs),
             overlap=_jaccard(strict_strong, sparcc_strong),
             sign_acc=_sign_accuracy(strict_pairs, strict_scores, planted_signs),
-            auroc=_auroc_from_edges(strict_pairs, strict_scores, planted_pairs, p),
+            auroc=_auroc_from_edges(strict_pairs, strict_scores, planted_pairs, p_kept),
             recall=_recall_at_k_edges(strict_pairs, strict_scores, planted_pairs, n_planted),
             seconds=t_strict, peak=peak_strict,
             fallback_reason=strict_res.diagnostics.fallback_reason,
@@ -215,7 +231,7 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
             candidate_recall=_recall_planted(fast_pairs, planted_pairs),
             overlap=_jaccard(fast_strong, sparcc_strong),
             sign_acc=_sign_accuracy(fast_pairs, fast_scores, planted_signs),
-            auroc=_auroc_from_edges(fast_pairs, fast_scores, planted_pairs, p),
+            auroc=_auroc_from_edges(fast_pairs, fast_scores, planted_pairs, p_kept),
             recall=_recall_at_k_edges(fast_pairs, fast_scores, planted_pairs, n_planted),
             seconds=t_fast, peak=peak_fast,
             fallback_reason=fast_res.diagnostics.fallback_reason,
@@ -240,7 +256,7 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
             candidate_recall=_recall_planted(cal_pairs, planted_pairs),
             overlap=_jaccard(cal_strong, sparcc_strong),
             sign_acc=_sign_accuracy(cal_pairs, cal_scores, planted_signs),
-            auroc=_auroc_from_edges(cal_pairs, cal_scores, planted_pairs, p),
+            auroc=_auroc_from_edges(cal_pairs, cal_scores, planted_pairs, p_kept),
             recall=_recall_at_k_edges(cal_pairs, cal_scores, planted_pairs, n_planted),
             seconds=t_cal, peak=peak_cal,
             fallback_reason=cal_res.diagnostics.fallback_reason,

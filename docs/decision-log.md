@@ -104,6 +104,22 @@ they appear even for completely finite matrices and obscure real
 diagnostic output. Real numerical issues remain visible through explicit
 `np.isfinite` checks.
 
+### 2026-06-02 — Benchmark uses pre-filtered counts for parity
+
+**Decision.** Both `benchmarks/falcon_sr_single.py` and
+`benchmarks/falcon_sr_cross.py` run every method on the same matrix
+returned by `prepare_log_composition`, with planted edges remapped to
+the surviving index space.
+
+**Why.** Falcon-SR's preprocessing drops all-zero columns (a hard
+constraint of log-ratio analysis), while `sparcc_py` and `pearson_clr`
+ran on the raw counts in the first pass. At `n=100, p=1000` ~3.7% of
+features were filtered, which propagated to a ~7% drop in
+`candidate_recall` and a spurious AUROC gap between `falcon_sr_strict`
+(0.504) and `sparcc_py` (0.577). After the fix `falcon_sr_strict` and
+`sparcc_py` match to four decimal places, so the algorithm is sound —
+only the comparison was unfair.
+
 ## 2026-06-02 feasibility benchmark findings
 
 Run: 3 reps per cell, host = local laptop, BLAS = Accelerate, see
@@ -118,14 +134,18 @@ Run: 3 reps per cell, host = local laptop, BLAS = Accelerate, see
   cell: candidate recall 0.756 → 0.873, AUROC 0.868 → 0.927; no regression
   on easy cells.
 
-**Single-domain**:
-- `edge_overlap_vs_sparcc ≥ 0.95` on every cell except (n=100, p=1000),
-  where both SparCC and Falcon-SR fall to chance because n is too small
-  to estimate ~10⁴ planted correlations. (n=500, p=1000) reaches
-  `edge_overlap_vs_sparcc = 0.998` at top_k=50.
-- Sign accuracy = 1.000 on all (n ≥ 100, p ≤ 500) cells; drops to ~0.55 on
-  (n=100, p=1000) — again driven by the underdetermined regime, not by
-  the algorithm.
+**Single-domain** (after benchmark-parity fix above):
+- `edge_overlap_vs_sparcc ≥ 0.95` on every n ≥ 500 cell except
+  (p=1000, top_k≤25) where the screen budget under-covers the
+  candidate density; raising top_k to 50 recovers 0.998 overlap.
+- Sign accuracy ≥ 0.97 on every n ≥ 500 cell.
+- At n=100/p=1000 the absolute AUROC is 0.54–0.58 for every method
+  including SparCC; the regime is genuinely underdetermined (≈10⁴
+  planted correlations from 100 samples), not an algorithm bug.
+- `falcon_sr_strict` matches `sparcc_py` to four decimal places at
+  every cell where neither hits a numerical fallback, confirming the
+  iterative-exclusion implementation is equivalent to SparCC in the
+  ranges where SparCC itself produces a reliable estimate.
 
 **Wall-clock at p ≤ 1000**:
 - Falcon-SR fast (no calibration): 0.01–0.10 s.
