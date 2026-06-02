@@ -32,7 +32,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "benchmarks"))
 
-from comparison_methods import sparxcc_base, sparxcc_iter  # noqa: E402
+from comparison_methods import (  # noqa: E402
+    sparxcc_base, sparxcc_iter, spieceasi_cross_glasso,
+)
 from falcon import infer_cross  # noqa: E402
 from falcon.preprocessing import prepare_log_composition  # noqa: E402
 from falcon.prior import PriorEdge  # noqa: E402
@@ -260,6 +262,33 @@ def run_cell(*, n: int, p: int, q: int, density: float, top_k: int, reps: int):
             fallback_reason=None, calibration_method=None,
             prior_count=0, data_disagreed_with_prior_count=0,
         ))
+
+        # SPIEC-EASI cross-domain joint graphical lasso. Targets partial
+        # cross-correlation rather than the SparXCC Case-C estimand;
+        # included here as an adjacent-estimand reference per the spec.
+        try:
+            spe_matrix, t_spe, peak_spe = _timed(
+                lambda: spieceasi_cross_glasso(counts_x, counts_y)
+            )
+            spe_strong = _strong_pairs_matrix(spe_matrix, n_planted)
+            spe_sign_acc = float(np.mean(
+                [np.sign(spe_matrix[i, k]) == planted_signs[(i, k)]
+                 for (i, k) in planted_pairs]
+            ))
+            out.append(_row(
+                method="spieceasi_cross_glasso", replicate=replicate,
+                n=n, p=p, q=q, density=density, top_k=top_k,
+                candidate_count=p_kept * q_kept, candidate_recall=1.0,
+                overlap=_jaccard(spe_strong, iter_strong),
+                sign_acc=spe_sign_acc,
+                auroc=_auroc_from_dense(spe_matrix, planted_pairs),
+                recall=_recall_dense(spe_matrix, planted_pairs, n_planted),
+                seconds=t_spe, peak=peak_spe,
+                fallback_reason=None, calibration_method=None,
+                prior_count=0, data_disagreed_with_prior_count=0,
+            ))
+        except Exception:
+            pass
 
         # Falcon-SR cross fast (no calibration, no prior)
         fast_res, t_fast, peak_fast = _timed(

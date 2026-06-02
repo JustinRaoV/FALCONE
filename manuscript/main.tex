@@ -80,10 +80,14 @@ SparXCC iter on every cross-domain cell, and matches the SparCC
 closed-form ranking on every single-domain cell where SparCC itself is
 informative. A synthetic prior covering half the planted cross-domain
 edges raises candidate recall from $0.756$ to $0.873$ on the hardest
-cell, with no regression on easier cells. Falcon-SR therefore preserves
-the SparCC and SparXCC estimands while opening a route, via low-rank or
-random-projection base scores, to inference regimes where the existing
-iterative loop is the bottleneck.\\
+cell, with no regression on easier cells. Against an eight-method
+baseline panel (SparCC, Pearson(CLR), Pearson(raw), SPIEC-EASI MB,
+SPIEC-EASI glasso, SparXCC base/iter, SPIEC-EASI cross-glasso),
+Falcon-SR is the only sparse estimator that preserves the SparCC and
+SparXCC ranks; SPIEC-EASI partial-correlation methods overlap the
+SparCC reference at only $\approx 0.56$, and SPIEC-EASI cross-glasso
+falls to AUROC $0.50$ on the hardest cross cell where Falcon-SR fast
+holds $0.87$ and the prior pipeline reaches $0.93$.\\
 \textbf{Availability and implementation:}
 \href{https://github.com/JustinRaoV/FALCONE}{https://github.com/JustinRaoV/FALCONE}.
 Implemented in Python 3.12 with NumPy and SciPy. The repository ships
@@ -141,9 +145,13 @@ the SparXCC centring identity exact, and an optional signed
 biological prior whose analytic post-hoc shrinkage never overrides a
 strong data signal. Approximate permutation calibration produces
 candidate-set $q$-values within the feasibility wall-clock budget. We
-validate every claim on a controlled simulation grid against SparCC,
-SparXCC base, SparXCC iter, and Pearson(CLR) baselines, with all
-inputs, implementations, and acceptance gates open for inspection.
+validate every claim on a controlled simulation grid against an
+eight-method single-domain baseline panel (SparCC, Pearson(CLR),
+Pearson(raw), SPIEC-EASI MB, SPIEC-EASI glasso, plus Falcon-SR strict,
+fast, and fast + calibrate) and a six-method cross-domain panel
+(SparXCC base, SparXCC iter, SPIEC-EASI cross-glasso, plus Falcon-SR
+cross fast, fast + calibrate, and fast + prior). All inputs,
+implementations, and acceptance gates are open for inspection.
 
 \section{Methods}\label{sec:methods}
 
@@ -320,37 +328,57 @@ where neither estimator hit a numerical fallback.
 \subsection{Single-domain feasibility}\label{sec:results-single}
 
 We swept $n \in \{100, 500\}$, $p \in \{100, 500, 1000\}$, and
-$\texttt{top\_k} \in \{10, 25, 50\}$ with edge density $0.02$.
-Figure~\ref{fig:single}b reports candidate recall against
-$\texttt{top\_k}$. At $n = 500$, recall reached $1.000$ on $p = 100$,
-$0.797$--$0.934$ on $p = 500$, and $0.216$--$0.433$ on $p = 1000$ as
-the budget grew from $10$ to $50$. Edge overlap against the SparCC
-reference (Figure~\ref{fig:single}c) met the spec gate of $0.95$ on
-every $n \geq 500$ cell except $(p = 1000, \texttt{top\_k} \leq 25)$,
-where raising \texttt{top\_k} to $50$ recovered $0.998$ overlap. Sign
-accuracy was $\geq 0.97$ on every $n \geq 500$ cell.
+$\texttt{top\_k} \in \{10, 25, 50\}$ with edge density $0.02$, and
+ran every cell through eight estimators: Falcon-SR strict / fast /
+fast + calibrate, SparCC, Pearson(CLR), Pearson(raw), SPIEC-EASI MB,
+and SPIEC-EASI glasso. The first five target the latent
+log-abundance Pearson correlation; the last three target a different
+estimand (raw compositional Pearson and partial / inverse-covariance
+edges) and are included as adjacent context.
 
-In the $n = 100, p = 1000$ corner of the grid, all four estimators
-(SparCC, Pearson(CLR), Falcon-SR strict, Falcon-SR fast) reported
-AUROC between $0.50$ and $0.58$ against the planted truth. SparCC and
-Falcon-SR strict agreed to four decimal places on the same cells.
+Figure~\ref{fig:single}b reports Falcon-SR fast candidate recall
+against $\texttt{top\_k}$. At $n = 500$, recall reached $1.000$ on
+$p = 100$, $0.797$--$0.934$ on $p = 500$, and $0.216$--$0.433$ on
+$p = 1000$ as the budget grew from $10$ to $50$. The
+methods-by-cells AUROC heatmap (Figure~\ref{fig:single}c) places
+Falcon-SR fast within $\approx 0.03$ AUROC of SparCC on every cell,
+and matches SparCC exactly under strict mode. Pearson(raw) drops to
+$0.18$ overlap with the SparCC reference on the $n \geq 500$ cells,
+which confirms that ignoring the compositional structure is
+catastrophic for ranking even though the method appears competitive
+on AUROC alone. SPIEC-EASI MB and glasso overlap the SparCC reference
+at only $\approx 0.56$ on the same cells, consistent with their
+partial-correlation estimand.
+
+In the $n = 100, p = 1000$ corner of the grid, every
+latent-correlation estimator collapsed to AUROC $0.50$--$0.58$
+against the planted truth. SparCC and Falcon-SR strict agreed to
+four decimal places on the same cells, so the gap was attributable
+to the regime, not to the implementation.
+
 Figure~\ref{fig:single}d records wall-clock against $p$. At $p \leq
-1000$, Falcon-SR fast ran roughly $10\times$ slower than the SparCC
-closed-form GEMM; Falcon-SR strict ran slower still, and the
-permutation-calibrated variant added a further factor of $20$ at
-$p = 1000$.
+1000$, Falcon-SR fast and strict cost $\sim 10\times$ more than
+SparCC's closed-form GEMM; the permutation-calibrated variant added
+a further factor of about $20$ at $p = 1000$. The two SPIEC-EASI
+variants ran $50$--$120\times$ slower than Falcon-SR fast at
+$p = 1000$ ($5.1$ s for MB and $12.1$ s for glasso, against $0.099$
+s for Falcon-SR fast), so for ranking-only use the cost gap relative
+to SparCC is bracketed on both sides.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figure1.pdf}
-\caption{Falcon-SR single-domain feasibility. \textbf{a}, Screen-refine
-workflow: dense base score, top-$k$ candidate union, sparse exclusion
-refinement, adaptive growth, and permutation calibration.
-\textbf{b}, Candidate recall against the planted truth as a function of
-the screen budget $\texttt{top\_k}$, coloured by $p$ and dashed by $n$.
-\textbf{c}, Edge overlap against the SparCC reference; the dashed line
-is the spec gate $0.95$. \textbf{d}, Wall-clock against $p$, averaged
-over $n$ and $\texttt{top\_k}$, log-log.}
+\caption{Falcon-SR single-domain feasibility against the eight-method
+baseline panel. \textbf{a}, Screen-refine workflow: dense base score,
+top-$k$ candidate union, sparse exclusion refinement, adaptive growth,
+and permutation calibration. \textbf{b}, Candidate recall against the
+planted truth as a function of the screen budget $\texttt{top\_k}$ for
+Falcon-SR fast, coloured by $p$ and dashed by $n$. \textbf{c}, AUROC
+heatmap, methods (rows) against $(n, p)$ cells (columns), best top-$k$
+per cell, averaged over replicates. Horizontal white lines separate
+the three estimand families (Falcon-SR, SparCC/Pearson, SPIEC-EASI).
+\textbf{d}, Wall-clock against $p$, averaged over $n$ and
+$\texttt{top\_k}$, log-log, for every method.}
 \label{fig:single}
 \end{figure*}
 
@@ -358,29 +386,45 @@ over $n$ and $\texttt{top\_k}$, log-log.}
 
 We swept $n \in \{100, 500\}$, $(p, q) \in \{(100, 100), (500, 500)\}$,
 and $\texttt{top\_k} \in \{10, 25\}$ at bipartite edge density $0.01$.
-Edge overlap against the SparXCC iter reference
-(Figure~\ref{fig:cross}b) was $\geq 0.984$ on every cell, with sign
-accuracy of $1.000$ throughout. On the hardest cell ($n = 100$,
+Each cell was run through six estimators: Falcon-SR cross fast /
+fast + calibrate / fast + prior, SparXCC base, SparXCC iter, and
+SPIEC-EASI cross-glasso. The first five target the Case-C
+cross-correlation estimand; SPIEC-EASI cross-glasso targets the
+partial cross-correlation on stacked compositions and is included as
+adjacent context.
+
+Falcon-SR fast reached edge overlap $\geq 0.984$ against the SparXCC
+iter reference on every cell, with sign accuracy of $1.000$
+throughout (Figure~\ref{fig:cross}b). On the hardest cell ($n = 100$,
 $p = q = 500$, $\texttt{top\_k} = 10$), Falcon-SR fast reached
 candidate recall $0.756$ and AUROC $0.868$ against the planted truth.
-SparXCC base, the non-iterative dense baseline, reached comparable
-overlap on the same cells.
+SPIEC-EASI cross-glasso collapsed on the same cell to AUROC $0.501$
+and edge overlap $0.006$ against SparXCC iter, consistent with
+\citet{brunner2024crosskingdom}: stacking two normalised compositions
+distorts exactly the quantity SparXCC Case-C was designed to recover.
 
 Wall-clock scaled linearly with the bipartite pair count $p \cdot q$
-for every method (Figure~\ref{fig:cross}c). Falcon-SR fast and
-Falcon-SR fast with the prior tracked the SparXCC iter cost band; the
-calibrated variant added a flat overhead because the permutation count
-was fixed at $R = 100$ regardless of cell size.
+for every method (Figure~\ref{fig:cross}c). Falcon-SR fast and the
+prior variant tracked the SparXCC iter cost band; the
+permutation-calibrated variant added a flat overhead from the fixed
+$R = 100$ permutations; SPIEC-EASI cross-glasso ran two orders of
+magnitude slower at $p \cdot q = 2.5 \times 10^5$.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figure2.pdf}
-\caption{Falcon-SR cross-domain feasibility. \textbf{a}, Workflow with
-optional prior branch. \textbf{b}, Edge overlap against the SparXCC
-iter reference per cell; the dashed line is the spec gate $0.95$.
-\textbf{c}, Wall-clock against $p \cdot q$, log-log. \textbf{d}, Prior
-ablation: candidate recall (bars) and AUROC (overlaid dots) with and
-without the synthetic prior covering half the planted edges.}
+\caption{Falcon-SR cross-domain feasibility against the six-method
+baseline panel. \textbf{a}, Workflow with optional prior branch.
+\textbf{b}, AUROC against planted truth, methods (rows) against
+$(n, p, q, \texttt{top\_k})$ cells (columns), averaged over
+replicates. A horizontal white line separates Falcon-SR / SparXCC
+(same estimand) from SPIEC-EASI cross-glasso (partial correlation).
+\textbf{c}, Wall-clock against $p \cdot q$, log-log, every method.
+\textbf{d}, Prior gain restricted to the two cells where Falcon-SR
+fast did not already saturate ($n = 100$, $p = q = 500$,
+$\texttt{top\_k} \in \{10, 25\}$). Paired bars compare Falcon-SR fast
+to Falcon-SR fast + prior on candidate recall and on AUROC; green
+annotations report the absolute gain.}
 \label{fig:cross}
 \end{figure*}
 
@@ -459,16 +503,25 @@ to optimised C++. fastCCLasso \citep{zhang2024fastcclasso} reduces the
 per-iteration cost in a related ${\rm L}_1$-regularised formulation.
 Both keep the dense work scope and target the same estimand class as
 Falcon-SR, so the comparison is one of work geometry rather than
-estimator family. SPIEC-EASI \citep{kurtz2015spieceasi} and other
-partial- or precision-matrix estimators target conditional dependence,
-and proportionality estimators \citep{lovell2015proportionality}
-target a different quantity entirely; both groups are useful adjacent
-references but not head-to-head substitutes for SparCC. Finally,
-\citet{brunner2024crosskingdom} document that naive concatenation of
-two normalised compositions distorts the very quantity SparXCC Case-C
-was designed to recover, which is why we benchmarked Falcon-SR against
-SparXCC iter on a bipartite simulator rather than on stacked
-single-domain inference.
+estimator family.
+
+The expanded baseline panel makes the cost of switching estimand
+visible. SPIEC-EASI MB and SPIEC-EASI glasso
+\citep{kurtz2015spieceasi} overlap the SparCC reference at only
+$\approx 0.56$ on the $n \geq 500$ cells, even though their AUROC
+against the planted truth is comparable; the gap quantifies the
+disagreement between marginal and conditional dependence. Pearson on
+raw compositions drops to $0.18$ overlap with SparCC, recovering the
+well-known closure failure as a sanity check.
+\citet{brunner2024crosskingdom} document the cross-domain analogue:
+stacking two normalised compositions distorts the quantity SparXCC
+Case-C was designed to recover. The cross-domain benchmark confirms
+this directly. SPIEC-EASI cross-glasso reached AUROC $0.501$ on the
+hardest cell ($n = 100$, $p = q = 500$, $\texttt{top\_k} = 10$), at
+which Falcon-SR fast held AUROC $0.868$ and the prior pipeline
+reached $0.928$. Proportionality estimators
+\citep{lovell2015proportionality} target a different quantity again;
+we list them in adjacent context rather than head-to-head benchmarks.
 
 \subsection{Limitations}\label{sec:discuss-limits}
 

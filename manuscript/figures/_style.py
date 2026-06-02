@@ -20,15 +20,25 @@ MM = 1.0 / 25.4
 # Falcon-SR family (orange), one accent (green) for prior, plus a soft
 # secondary grey for reference / baseline elements.
 PALETTE = {
+    # SparCC family (blue, latent log-abundance correlation)
     "sparcc": "#3C6997",
-    "pearson": "#88AED0",
+    "pearson_clr": "#88AED0",
+    "pearson_raw": "#B3C8DC",
+    # SparXCC family (blue, cross-domain analogue)
     "sparxcc_iter": "#3C6997",
     "sparxcc_base": "#88AED0",
+    # SPIEC-EASI family (purple, partial-correlation estimand)
+    "spieceasi_mb": "#7B5BA0",
+    "spieceasi_glasso": "#A98BBF",
+    "spieceasi_cross": "#7B5BA0",
+    # Falcon-SR family (orange, screen-refine pipeline)
     "falcon_strict": "#A05030",
     "falcon_fast": "#D8753E",
     "falcon_calibrated": "#F2B36E",
+    # Prior accent (green)
     "falcon_prior": "#5A9F6D",
     "neutral": "#666666",
+    # Schematic palette
     "schematic_box": "#E7EEF5",
     "schematic_edge": "#3C6997",
     "schematic_prior_box": "#E6F0E7",
@@ -39,6 +49,10 @@ PALETTE = {
 METHOD_LABEL = {
     "sparcc_py": "SparCC",
     "pearson_clr": "Pearson(CLR)",
+    "pearson_raw": "Pearson(raw)",
+    "spieceasi_mb": "SPIEC-EASI MB",
+    "spieceasi_glasso": "SPIEC-EASI glasso",
+    "spieceasi_cross_glasso": "SPIEC-EASI cross-glasso",
     "sparxcc_base": "SparXCC base",
     "sparxcc_iter": "SparXCC iter",
     "falcon_sr_strict": "Falcon-SR strict",
@@ -49,9 +63,31 @@ METHOD_LABEL = {
     "falcon_sr_cross_prior": "Falcon-SR fast + prior",
 }
 
+# Family annotation helps readers separate estimand groups in heatmaps.
+METHOD_FAMILY = {
+    "sparcc_py": "SparCC",
+    "pearson_clr": "Pearson",
+    "pearson_raw": "Pearson",
+    "spieceasi_mb": "SPIEC-EASI",
+    "spieceasi_glasso": "SPIEC-EASI",
+    "spieceasi_cross_glasso": "SPIEC-EASI",
+    "sparxcc_base": "SparXCC",
+    "sparxcc_iter": "SparXCC",
+    "falcon_sr_strict": "Falcon-SR",
+    "falcon_sr_fast": "Falcon-SR",
+    "falcon_sr_fast_calibrated": "Falcon-SR",
+    "falcon_sr_cross_fast": "Falcon-SR",
+    "falcon_sr_cross_fast_calibrated": "Falcon-SR",
+    "falcon_sr_cross_prior": "Falcon-SR",
+}
+
 METHOD_COLOR = {
     "sparcc_py": PALETTE["sparcc"],
-    "pearson_clr": PALETTE["pearson"],
+    "pearson_clr": PALETTE["pearson_clr"],
+    "pearson_raw": PALETTE["pearson_raw"],
+    "spieceasi_mb": PALETTE["spieceasi_mb"],
+    "spieceasi_glasso": PALETTE["spieceasi_glasso"],
+    "spieceasi_cross_glasso": PALETTE["spieceasi_cross"],
     "sparxcc_iter": PALETTE["sparxcc_iter"],
     "sparxcc_base": PALETTE["sparxcc_base"],
     "falcon_sr_strict": PALETTE["falcon_strict"],
@@ -65,6 +101,10 @@ METHOD_COLOR = {
 METHOD_MARKER = {
     "sparcc_py": "o",
     "pearson_clr": "v",
+    "pearson_raw": "v",
+    "spieceasi_mb": "X",
+    "spieceasi_glasso": "P",
+    "spieceasi_cross_glasso": "X",
     "sparxcc_iter": "o",
     "sparxcc_base": "v",
     "falcon_sr_strict": "D",

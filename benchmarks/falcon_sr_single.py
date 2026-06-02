@@ -37,7 +37,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "benchmarks"))
 
-from comparison_methods import pearson_clr, sparcc_py  # noqa: E402
+from comparison_methods import (  # noqa: E402
+    pearson_clr, pearson_raw, sparcc_py,
+    spieceasi_glasso, spieceasi_mb,
+)
 from falcon import infer_single  # noqa: E402
 from falcon.preprocessing import prepare_log_composition  # noqa: E402
 from io_utils import append_row  # noqa: E402
@@ -190,6 +193,40 @@ def run_cell(*, n: int, p: int, density: float, top_k: int, reps: int):
             seconds=t_pearson, peak=peak_pearson,
             fallback_reason=None, calibration_method=None,
         ))
+
+        # Pearson(raw) and SPIEC-EASI baselines also return dense (p, p)
+        # matrices. They get scored with exactly the same pipeline as the
+        # other dense baselines so the comparison is apples-to-apples; the
+        # SPIEC-EASI variants estimate partial / inverse-covariance edges,
+        # not the latent log-abundance correlations Falcon-SR targets, but
+        # are included as adjacent-estimand context per the spec.
+        for method_name, method_fn in [
+            ("pearson_raw", lambda c: pearson_raw(c)),
+            ("spieceasi_mb", lambda c: spieceasi_mb(c)),
+            ("spieceasi_glasso", lambda c: spieceasi_glasso(c)),
+        ]:
+            try:
+                m_matrix, t_m, peak_m = _timed(lambda fn=method_fn: fn(counts))
+            except Exception:
+                continue
+            m_strong = _strong_pairs_from_matrix(m_matrix, n_planted)
+            m_scores_flat = np.abs(m_matrix[rows, cols])
+            m_sign_acc = float(np.mean(
+                [np.sign(m_matrix[i, j]) == planted_signs[(i, j)]
+                 for (i, j) in planted_pairs]
+            ))
+            out.append(_row(
+                method=method_name, replicate=replicate, n=n, p=p,
+                density=density, top_k=top_k,
+                candidate_count=p_kept * (p_kept - 1) // 2,
+                candidate_recall=1.0,
+                overlap=_jaccard(m_strong, sparcc_strong),
+                sign_acc=m_sign_acc,
+                auroc=_fast_auroc(m_scores_flat, labels),
+                recall=_recall_at_k(m_scores_flat, labels, n_planted),
+                seconds=t_m, peak=peak_m,
+                fallback_reason=None, calibration_method=None,
+            ))
 
         # Falcon-SR strict
         strict_res, t_strict, peak_strict = _timed(
