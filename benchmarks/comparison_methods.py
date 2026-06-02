@@ -23,13 +23,41 @@ stronger inferred edges.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from falcon import clr_transform, multiplicative_replacement  # noqa: E402
+
+def multiplicative_replacement(X: np.ndarray, delta: float | None = None) -> np.ndarray:
+    """Martin-Fernandez (2003) multiplicative zero replacement.
+
+    Inlined here so the comparison-methods module is self-contained and does
+    not depend on the active Falcon package surface.
+    """
+    X = np.asarray(X, dtype=np.float64)
+    n, p = X.shape
+    if delta is None:
+        delta = 0.65 / (p * p)
+    row_sums = X.sum(axis=1, keepdims=True)
+    row_sums = np.where(row_sums == 0, 1.0, row_sums)
+    C = X / row_sums
+    zero_mask = C == 0
+    n_zeros = zero_mask.sum(axis=1, keepdims=True)
+    scaling = 1.0 - n_zeros * delta
+    return np.where(zero_mask, delta, C * scaling)
+
+
+def clr_transform(X: np.ndarray, zero_method: str = "multiplicative") -> np.ndarray:
+    """Centered log-ratio transform with multiplicative or pseudocount zero
+    handling. Inlined to keep this module independent of the Falcon package.
+    """
+    if zero_method == "multiplicative":
+        C = multiplicative_replacement(X)
+    elif zero_method == "pseudocount":
+        C = np.asarray(X, dtype=np.float64) + 0.5
+        C = C / C.sum(axis=1, keepdims=True)
+    else:
+        raise ValueError(f"unknown zero_method: {zero_method}")
+    log_C = np.log(C)
+    return log_C - log_C.mean(axis=1, keepdims=True)
 
 
 # ---------------------------------------------------------------------------
