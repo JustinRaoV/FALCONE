@@ -1,5 +1,14 @@
 # Falcon-SR Single-Domain Feasibility Implementation Plan
 
+> **SUPERSEDED 2026-06-02.** The single-domain feasibility scope captured
+> below has been folded into a single end-to-end rewrite covering
+> single + cross + priors + calibration + benchmarks + manuscript
+> skeleton, executed against
+> `docs/superpowers/specs/2026-06-02-falcon-sr-rewrite-execution-design.md`.
+> Tasks 1–6 of this plan landed before the rewrite; tasks 7–8 are now
+> subsumed by `benchmarks/falcon_sr_single.py` and the refreshed
+> documentation. This file is retained for historical context only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build and measure a tested single-domain Falcon-SR prototype that estimates the same latent log-abundance Pearson correlations as SparCC, screens a sparse candidate set, and refines candidates without repeating dense exclusion solves.
