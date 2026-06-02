@@ -50,3 +50,4 @@ ref/
 # The .pdf versions are kept because the LaTeX main.tex includes them.
 manuscript/figures/*.png
 manuscript/figures/*.svg
+manuscript/figures/*.tiff
