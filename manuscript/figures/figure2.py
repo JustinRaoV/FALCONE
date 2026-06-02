@@ -159,6 +159,45 @@ def _draw_schematic(ax) -> None:
             color="#1F3A56")
 
 
+def _panel_overlap_bars(ax, rows) -> None:
+    """Edge overlap against the SparXCC iter reference, per method,
+    averaged across cells. Mirrors the single-domain headline panel:
+    Falcon-SR variants match SparXCC iter; SPIEC-EASI cross-glasso
+    drops to ~0.74 averaged (and to ~0.006 on the hardest cell)
+    because it targets the partial cross-correlation on stacked
+    compositions, not the SparXCC Case-C estimand.
+    """
+    by_method = defaultdict(list)
+    for r in rows:
+        by_method[r["method"]].append(r["edge_overlap_vs_sparxcc_iter"])
+    method_order = [m for m in CROSS_METHOD_ORDER if m in by_method]
+    means = [_avg(by_method[m]) for m in method_order]
+
+    x = list(range(len(method_order)))
+    ax.barh(x, means,
+            color=[METHOD_COLOR[m] for m in method_order],
+            edgecolor="white", linewidth=0.4)
+    for xi, mean in zip(x, means):
+        ax.text(min(mean + 0.015, 1.02), xi, f"{mean:.2f}",
+                ha="left", va="center", fontsize=5.6, color="black")
+
+    ax.axvline(0.95, linestyle="--", linewidth=0.6,
+               color="#888888", alpha=0.9, zorder=0)
+    ax.text(0.94, len(method_order) - 0.5, "0.95",
+            fontsize=5.0, color="#555555",
+            ha="right", va="top")
+
+    for i in range(1, len(method_order)):
+        if METHOD_FAMILY[method_order[i]] != METHOD_FAMILY[method_order[i - 1]]:
+            ax.axhline(i - 0.5, color="#CCCCCC", linewidth=0.4, zorder=0)
+
+    ax.set_yticks(x)
+    ax.set_yticklabels([METHOD_LABEL[m] for m in method_order], fontsize=5.8)
+    ax.invert_yaxis()
+    ax.set_xlim(0, 1.15)
+    ax.set_xlabel("edge overlap\nvs SparXCC iter")
+
+
 def _heatmap_panel(ax, rows, metric_key, title) -> None:
     """Generic methods x cells heatmap for the cross benchmark."""
     import numpy as np
@@ -367,29 +406,32 @@ def main():
 
     import matplotlib.pyplot as plt
 
-    fig = plt.figure(figsize=(183 * MM, 130 * MM))
+    fig = plt.figure(figsize=(195 * MM, 135 * MM))
     gs = fig.add_gridspec(
-        nrows=2, ncols=3,
-        height_ratios=[0.55, 1.0],
-        width_ratios=[1.5, 1.0, 1.0],
-        hspace=0.65, wspace=0.55,
-        left=0.06, right=0.97, top=0.96, bottom=0.10,
+        nrows=2, ncols=4,
+        height_ratios=[0.5, 1.0],
+        width_ratios=[0.95, 1.25, 0.8, 0.95],
+        hspace=0.65, wspace=1.05,
+        left=0.06, right=0.98, top=0.96, bottom=0.10,
     )
     ax_a = fig.add_subplot(gs[0, :])
     ax_b = fig.add_subplot(gs[1, 0])
     ax_c = fig.add_subplot(gs[1, 1])
     ax_d = fig.add_subplot(gs[1, 2])
+    ax_e = fig.add_subplot(gs[1, 3])
 
     _draw_schematic(ax_a)
-    _heatmap_panel(ax_b, rows, "auroc_vs_truth",
+    _panel_overlap_bars(ax_b, rows)
+    _heatmap_panel(ax_c, rows, "auroc_vs_truth",
                    "AUROC vs planted truth")
-    _panel_time(ax_c, rows)
-    _panel_prior(ax_d, rows)
+    _panel_time(ax_d, rows)
+    _panel_prior(ax_e, rows)
 
     panel_letter(ax_a, "a", dx=-0.005, dy=0.95)
-    panel_letter(ax_b, "b", dx=-0.05)
-    panel_letter(ax_c, "c")
+    panel_letter(ax_b, "b")
+    panel_letter(ax_c, "c", dx=-0.05)
     panel_letter(ax_d, "d")
+    panel_letter(ax_e, "e")
 
     save_pub(fig, OUT_DIR / "figure2")
     print("Wrote figure2.{svg,pdf,tiff}")

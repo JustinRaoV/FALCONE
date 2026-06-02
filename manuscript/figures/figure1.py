@@ -151,36 +151,54 @@ def _draw_schematic(ax) -> None:
     )
 
 
-def _panel_recall(ax, rows) -> None:
-    fast_by_cell = defaultdict(lambda: defaultdict(list))
-    for r in rows:
-        if r["method"] != "falcon_sr_fast":
-            continue
-        cell = (int(r["n"]), int(r["p"]))
-        fast_by_cell[cell][int(r["top_k"])].append(r["candidate_recall"])
+def _panel_overlap_bars(ax, rows) -> None:
+    """Edge overlap against the SparCC reference, per method, on the
+    n>=500 cells where SparCC is itself reliable. This is the headline
+    differentiator: Falcon-SR fast is the only sparse method that
+    preserves the SparCC ranking; Pearson(raw) collapses to 0.18 because
+    it ignores compositionality, and the SPIEC-EASI partial-correlation
+    methods overlap at only ~0.56 because they target a different
+    estimand. SparCC itself sits at 1.0 by definition.
+    """
+    import numpy as np
 
-    p_color = {100: "#88AED0", 500: "#3C6997", 1000: "#1E3F5F"}
-    n_dash = {100: ":", 500: "-"}
-    for (n, p), k_to_recalls in sorted(fast_by_cell.items()):
-        ks = sorted(k_to_recalls)
-        means = [_avg(k_to_recalls[k]) for k in ks]
-        ax.plot(
-            ks, means,
-            color=p_color.get(p, PALETTE["neutral"]),
-            linestyle=n_dash.get(n, "-"),
-            marker="o",
-            label=f"n={n}, p={p}",
-        )
-    ax.set_xlabel("top-$k$ candidate budget")
-    ax.set_ylabel("candidate recall\n(vs planted truth)")
-    ax.set_xticks([10, 25, 50])
-    ax.set_ylim(-0.02, 1.08)
-    ax.legend(
-        loc="upper left",
-        bbox_to_anchor=(0.02, 1.02),
-        ncol=2, columnspacing=0.8, handlelength=1.2,
-        fontsize=5.6,
-    )
+    by_method = defaultdict(list)
+    for r in rows:
+        if int(r["n"]) < 500:
+            continue
+        # Take Falcon-SR fast at its best (k=50) cell for fair comparison
+        if r["method"] in {"falcon_sr_fast", "falcon_sr_fast_calibrated"} \
+                and int(r["top_k"]) != 50:
+            continue
+        by_method[r["method"]].append(r["edge_overlap_vs_sparcc"])
+
+    method_order = [m for m in SINGLE_METHOD_ORDER if m in by_method]
+    means = [_avg(by_method[m]) for m in method_order]
+
+    bar_colors = [METHOD_COLOR[m] for m in method_order]
+    x = list(range(len(method_order)))
+    bars = ax.barh(x, means, color=bar_colors, edgecolor="white", linewidth=0.4)
+    for xi, m, mean in zip(x, method_order, means):
+        ax.text(min(mean + 0.015, 1.02), xi, f"{mean:.2f}",
+                ha="left", va="center", fontsize=5.6,
+                color="black")
+
+    ax.axvline(0.95, linestyle="--", linewidth=0.6,
+               color="#888888", alpha=0.9, zorder=0)
+    ax.text(0.94, len(method_order) - 0.5, "0.95",
+            fontsize=5.0, color="#555555",
+            ha="right", va="top")
+
+    # Inter-family separator lines
+    for i in range(1, len(method_order)):
+        if METHOD_FAMILY[method_order[i]] != METHOD_FAMILY[method_order[i - 1]]:
+            ax.axhline(i - 0.5, color="#CCCCCC", linewidth=0.4, zorder=0)
+
+    ax.set_yticks(x)
+    ax.set_yticklabels([METHOD_LABEL[m] for m in method_order], fontsize=5.8)
+    ax.invert_yaxis()
+    ax.set_xlim(0, 1.15)
+    ax.set_xlabel("edge overlap vs SparCC\n($n \\geq 500$ cells)")
 
 
 def _panel_auroc_heatmap(ax, rows) -> None:
@@ -296,13 +314,13 @@ def main():
 
     import matplotlib.pyplot as plt
 
-    fig = plt.figure(figsize=(183 * MM, 120 * MM))
+    fig = plt.figure(figsize=(195 * MM, 125 * MM))
     gs = fig.add_gridspec(
         nrows=2, ncols=3,
         height_ratios=[0.55, 1.0],
-        width_ratios=[0.9, 1.4, 1.0],
-        hspace=0.55, wspace=0.55,
-        left=0.06, right=0.97, top=0.96, bottom=0.10,
+        width_ratios=[0.85, 1.4, 0.95],
+        hspace=0.55, wspace=1.0,
+        left=0.05, right=0.98, top=0.96, bottom=0.10,
     )
     ax_a = fig.add_subplot(gs[0, :])
     ax_b = fig.add_subplot(gs[1, 0])
@@ -310,7 +328,7 @@ def main():
     ax_d = fig.add_subplot(gs[1, 2])
 
     _draw_schematic(ax_a)
-    _panel_recall(ax_b, rows)
+    _panel_overlap_bars(ax_b, rows)
     _panel_auroc_heatmap(ax_c, rows)
     _panel_time(ax_d, rows)
 

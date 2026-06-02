@@ -371,14 +371,18 @@ to SparCC is bracketed on both sides.
 \caption{Falcon-SR single-domain feasibility against the eight-method
 baseline panel. \textbf{a}, Screen-refine workflow: dense base score,
 top-$k$ candidate union, sparse exclusion refinement, adaptive growth,
-and permutation calibration. \textbf{b}, Candidate recall against the
-planted truth as a function of the screen budget $\texttt{top\_k}$ for
-Falcon-SR fast, coloured by $p$ and dashed by $n$. \textbf{c}, AUROC
-heatmap, methods (rows) against $(n, p)$ cells (columns), best top-$k$
-per cell, averaged over replicates. Horizontal white lines separate
-the three estimand families (Falcon-SR, SparCC/Pearson, SPIEC-EASI).
-\textbf{d}, Wall-clock against $p$, averaged over $n$ and
-$\texttt{top\_k}$, log-log, for every method.}
+and permutation calibration. \textbf{b}, Edge overlap against the
+SparCC reference, averaged over the $n \geq 500$ cells where SparCC is
+itself reliable. The dashed vertical line is the spec gate at $0.95$.
+All three Falcon-SR variants reach $1.00$ overlap with SparCC;
+Pearson(CLR) reaches $0.98$; Pearson(raw) collapses to $0.18$, which
+quantifies the closure failure of naive correlation on compositions;
+SPIEC-EASI MB and glasso reach only $\approx 0.56$ because they
+target conditional rather than marginal dependence. \textbf{c}, AUROC
+heatmap against planted truth, methods (rows) against $(n, p)$ cells
+(columns), best top-$k$ per cell. Horizontal white lines separate the
+three estimand families. \textbf{d}, Wall-clock against $p$, averaged
+over $n$ and $\texttt{top\_k}$, log-log.}
 \label{fig:single}
 \end{figure*}
 
@@ -415,16 +419,23 @@ magnitude slower at $p \cdot q = 2.5 \times 10^5$.
 \includegraphics[width=\textwidth]{figure2.pdf}
 \caption{Falcon-SR cross-domain feasibility against the six-method
 baseline panel. \textbf{a}, Workflow with optional prior branch.
-\textbf{b}, AUROC against planted truth, methods (rows) against
-$(n, p, q, \texttt{top\_k})$ cells (columns), averaged over
-replicates. A horizontal white line separates Falcon-SR / SparXCC
-(same estimand) from SPIEC-EASI cross-glasso (partial correlation).
-\textbf{c}, Wall-clock against $p \cdot q$, log-log, every method.
-\textbf{d}, Prior gain restricted to the two cells where Falcon-SR
-fast did not already saturate ($n = 100$, $p = q = 500$,
-$\texttt{top\_k} \in \{10, 25\}$). Paired bars compare Falcon-SR fast
-to Falcon-SR fast + prior on candidate recall and on AUROC; green
-annotations report the absolute gain.}
+\textbf{b}, Edge overlap against the SparXCC iter reference,
+averaged over every cell. Falcon-SR fast and Falcon-SR fast +
+calibrate reach $0.99$, matching SparXCC base ($1.00$) and SparXCC
+iter ($1.00$ by definition); Falcon-SR fast + prior reaches $0.95$
+because the prior intentionally reshapes the score on a small
+subset of edges; SPIEC-EASI cross-glasso reaches only $0.74$ and
+collapses to $0.006$ on the hardest cell ($n=100$, $p=q=500$). The
+dashed line is the spec gate at $0.95$. \textbf{c}, AUROC heatmap
+against planted truth, methods against
+$(n, p, q, \texttt{top\_k})$ cells. A horizontal white line
+separates the SparXCC / Falcon-SR family from SPIEC-EASI
+cross-glasso. \textbf{d}, Wall-clock against $p \cdot q$, log-log,
+every method. \textbf{e}, Prior gain restricted to the two cells
+where Falcon-SR fast did not already saturate ($n = 100$,
+$p = q = 500$, $\texttt{top\_k} \in \{10, 25\}$). Paired bars
+compare Falcon-SR fast to Falcon-SR fast + prior on candidate
+recall and on AUROC; green annotations report the absolute gain.}
 \label{fig:cross}
 \end{figure*}
 
