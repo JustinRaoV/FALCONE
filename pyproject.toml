@@ -77,6 +77,17 @@ dev = [
     "pytest>=9.0.3",
 ]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    # macOS Accelerate BLAS + NumPy 2.x spuriously emits
+    # "divide by zero / overflow / invalid value encountered in matmul"
+    # on valid finite inputs. Silence the false positive in tests; real
+    # numerical issues are caught by explicit isfinite assertions.
+    "ignore:divide by zero encountered in matmul:RuntimeWarning",
+    "ignore:overflow encountered in matmul:RuntimeWarning",
+    "ignore:invalid value encountered in matmul:RuntimeWarning",
+]
+
 # Note: matplotlib is intentionally NOT in any default dependency group
 # because the server (which only runs the benchmarks) does not need it.
 # Old compilers on shared HPC nodes (e.g. GCC 4.8.x) cannot build the
