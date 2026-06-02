@@ -1,18 +1,14 @@
-"""Generate Figure 1 (single-domain feasibility) from
-``data/falcon_sr_single_feasibility.csv``.
+"""Figure 1: Falcon-SR single-domain feasibility.
 
-Run after the benchmark has produced rows:
+Schematic-led 2x2 composite:
+    a) screen-refine workflow diagram (top row, full width).
+    b) candidate recall vs top-k budget per (n, p) cell for Falcon-SR fast.
+    c) edge overlap against the SparCC reference per cell.
+    d) wall-clock vs p, log-log, comparing every benchmarked method.
+
+Run after the feasibility benchmark has produced rows:
 
     uv run --extra figures python manuscript/figures/figure1.py
-
-Writes ``manuscript/figures/figure1.svg`` and ``figure1.pdf``. The figure
-is a 2x2 grid following spec §17 Figure Contract:
-
-    panel a: schematic of the screen-refine workflow (text label only;
-             a richer schematic is produced by the artist downstream).
-    panel b: candidate recall vs top_k budget per method.
-    panel c: edge overlap and sign accuracy across (n, p) cells.
-    panel d: wall-clock vs feature count p, log-log.
 """
 
 from __future__ import annotations
@@ -25,17 +21,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data" / "falcon_sr_single_feasibility.csv"
 OUT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(OUT_DIR))
+
+from _style import (  # noqa: E402
+    MM,
+    METHOD_COLOR,
+    METHOD_LABEL,
+    METHOD_MARKER,
+    PALETTE,
+    install_pub_style,
+    panel_letter,
+    save_pub,
+)
 
 
-def _load_rows():
-    rows = []
+def _load_rows() -> list[dict]:
     if not DATA.exists():
-        return rows
+        sys.exit(
+            f"No data at {DATA}; run benchmarks/falcon_sr_single.py first."
+        )
+    rows = []
     with DATA.open() as fh:
         for raw in csv.DictReader(fh):
             row = {}
             for k, v in raw.items():
-                if v == "" or v is None:
+                if v in ("", None):
                     row[k] = None
                 else:
                     try:
@@ -46,104 +56,217 @@ def _load_rows():
     return rows
 
 
+def _avg(xs):
+    xs = [x for x in xs if x is not None]
+    return sum(xs) / len(xs) if xs else float("nan")
+
+
+def _draw_schematic(ax) -> None:
+    import matplotlib.patches as patches
+
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 30)
+    ax.axis("off")
+
+    # 5 boxes evenly spaced across [3, 97]
+    box_specs = [
+        ("counts\n(n × p)",          3, 17, 14, 11),
+        ("dense base\nscore (GEMM)", 22, 17, 14, 11),
+        ("top-k\ncandidate\nunion", 41, 14, 14, 14),
+        ("sparse\nexclusion\nrefine", 60, 14, 14, 14),
+        ("calibrate\n(permutation)", 79, 17, 18, 11),
+    ]
+    centers_y = []
+    for label, x, y, w, h in box_specs:
+        rect = patches.FancyBboxPatch(
+            (x, y), w, h,
+            boxstyle="round,pad=0.4",
+            linewidth=0.7,
+            edgecolor=PALETTE["schematic_edge"],
+            facecolor=PALETTE["schematic_box"],
+        )
+        ax.add_patch(rect)
+        ax.text(
+            x + w / 2, y + h / 2, label,
+            ha="center", va="center",
+            fontsize=6.4,
+            color="#1F3A56",
+        )
+        centers_y.append(y + h / 2)
+
+    # Horizontal arrows between boxes (use mid-line y=22)
+    arrow_y = 22
+    for i in range(4):
+        x_from = box_specs[i][1] + box_specs[i][3]
+        x_to = box_specs[i + 1][1]
+        ax.annotate(
+            "",
+            xy=(x_to, arrow_y), xytext=(x_from, arrow_y),
+            arrowprops=dict(arrowstyle="-|>", linewidth=0.7,
+                            color=PALETTE["schematic_edge"]),
+        )
+
+    # Adaptive growth back-loop: top-k → refine, return to top-k if unstable
+    ax.annotate(
+        "",
+        xy=(48, 12), xytext=(67, 12),
+        arrowprops=dict(
+            arrowstyle="-|>", linewidth=0.6,
+            color=PALETTE["neutral"],
+            connectionstyle="arc3,rad=0.3",
+        ),
+    )
+    ax.text(
+        57, 6, "grow top-k if unstable",
+        ha="center", va="center",
+        fontsize=5.8, color=PALETTE["neutral"], style="italic",
+    )
+
+    # Output annotation below calibrate box
+    ax.annotate(
+        "",
+        xy=(88, 12), xytext=(88, 17),
+        arrowprops=dict(arrowstyle="-|>", linewidth=0.7,
+                        color=PALETTE["schematic_edge"]),
+    )
+    ax.text(
+        88, 9, "edge table + q-values",
+        ha="center", va="top",
+        fontsize=6.2, color="#1F3A56",
+    )
+
+
+def _panel_recall(ax, rows) -> None:
+    fast_by_cell = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        if r["method"] != "falcon_sr_fast":
+            continue
+        cell = (int(r["n"]), int(r["p"]))
+        fast_by_cell[cell][int(r["top_k"])].append(r["candidate_recall"])
+
+    p_color = {100: "#88AED0", 500: "#3C6997", 1000: "#1E3F5F"}
+    n_dash = {100: ":", 500: "-"}
+    for (n, p), k_to_recalls in sorted(fast_by_cell.items()):
+        ks = sorted(k_to_recalls)
+        means = [_avg(k_to_recalls[k]) for k in ks]
+        ax.plot(
+            ks, means,
+            color=p_color.get(p, PALETTE["neutral"]),
+            linestyle=n_dash.get(n, "-"),
+            marker="o",
+            label=f"n={n}, p={p}",
+        )
+    ax.set_xlabel("top-$k$ candidate budget")
+    ax.set_ylabel("candidate recall\n(vs planted truth)")
+    ax.set_xticks([10, 25, 50])
+    ax.set_ylim(-0.02, 1.08)
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(0.02, 1.02),
+        ncol=2, columnspacing=0.8, handlelength=1.2,
+        fontsize=5.6,
+    )
+
+
+def _panel_overlap(ax, rows) -> None:
+    fast_by_cell = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        if r["method"] != "falcon_sr_fast":
+            continue
+        cell = (int(r["n"]), int(r["p"]))
+        fast_by_cell[cell][int(r["top_k"])].append(
+            r["edge_overlap_vs_sparcc"]
+        )
+    p_color = {100: "#88AED0", 500: "#3C6997", 1000: "#1E3F5F"}
+    n_dash = {100: ":", 500: "-"}
+    for (n, p), k_to_vals in sorted(fast_by_cell.items()):
+        ks = sorted(k_to_vals)
+        means = [_avg(k_to_vals[k]) for k in ks]
+        ax.plot(
+            ks, means,
+            color=p_color.get(p, PALETTE["neutral"]),
+            linestyle=n_dash.get(n, "-"),
+            marker="s",
+            label=f"n={n}, p={p}",
+        )
+    ax.axhline(0.95, linestyle="--", linewidth=0.5,
+               color=PALETTE["neutral"], alpha=0.7)
+    ax.text(10, 0.96, "spec gate 0.95",
+            fontsize=5.5, color=PALETTE["neutral"],
+            ha="left", va="bottom")
+    ax.set_xlabel("top-$k$ candidate budget")
+    ax.set_ylabel("edge overlap\nvs SparCC reference")
+    ax.set_xticks([10, 25, 50])
+    ax.set_ylim(-0.02, 1.08)
+
+
+def _panel_time(ax, rows) -> None:
+    methods_to_plot = [
+        "sparcc_py", "pearson_clr",
+        "falcon_sr_fast", "falcon_sr_strict",
+        "falcon_sr_fast_calibrated",
+    ]
+    by_method = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        if r["method"] not in methods_to_plot:
+            continue
+        # Average over n and top_k for each p (representative cost vs p)
+        by_method[r["method"]][int(r["p"])].append(r["wallclock_seconds"])
+    for m in methods_to_plot:
+        if m not in by_method:
+            continue
+        ps = sorted(by_method[m])
+        ys = [_avg(by_method[m][p]) for p in ps]
+        ax.plot(
+            ps, ys,
+            color=METHOD_COLOR[m],
+            marker=METHOD_MARKER[m],
+            label=METHOD_LABEL[m],
+            linewidth=1.1,
+        )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("p (features per domain)")
+    ax.set_ylabel("wall-clock (s)")
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(0.02, 1.02),
+        ncol=1, columnspacing=0.6, handlelength=1.2,
+        fontsize=5.5,
+    )
+
+
 def main():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        sys.exit(
-            "matplotlib is required. Install with `uv sync --extra figures`."
-        )
-
+    install_pub_style()
     rows = _load_rows()
-    if not rows:
-        sys.exit(
-            f"No feasibility data at {DATA}. Run benchmarks/falcon_sr_single.py."
-        )
 
-    # Aggregate to cell-method level
-    grouped: dict[tuple, list[float]] = defaultdict(list)
-    grouped_time: dict[tuple, list[float]] = defaultdict(list)
-    for row in rows:
-        key = (row["method"], int(row["n"]), int(row["p"]), int(row["top_k"]))
-        grouped[key + ("overlap",)].append(row["edge_overlap_vs_sparcc"])
-        grouped[key + ("recall",)].append(row["candidate_recall"])
-        grouped[key + ("sign",)].append(row["sign_accuracy_vs_truth"])
-        grouped_time[key].append(row["wallclock_seconds"])
+    import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-    (ax_workflow, ax_recall), (ax_overlap, ax_time) = axes
+    fig = plt.figure(figsize=(183 * MM, 100 * MM))
+    gs = fig.add_gridspec(
+        nrows=2, ncols=3,
+        height_ratios=[0.7, 1.0],
+        width_ratios=[1.0, 1.0, 1.0],
+        hspace=0.55, wspace=0.45,
+        left=0.06, right=0.98, top=0.96, bottom=0.10,
+    )
+    ax_a = fig.add_subplot(gs[0, :])
+    ax_b = fig.add_subplot(gs[1, 0])
+    ax_c = fig.add_subplot(gs[1, 1])
+    ax_d = fig.add_subplot(gs[1, 2])
 
-    ax_workflow.set_title("a  screen-refine workflow")
-    ax_workflow.text(0.5, 0.5,
-                     "counts -> base -> top-k -> sparse refine -> calibrate",
-                     ha="center", va="center", wrap=True)
-    ax_workflow.axis("off")
+    _draw_schematic(ax_a)
+    _panel_recall(ax_b, rows)
+    _panel_overlap(ax_c, rows)
+    _panel_time(ax_d, rows)
 
-    # Panel b: candidate recall vs top_k for Falcon-SR fast
-    method = "falcon_sr_fast"
-    points = defaultdict(list)
-    for key, vals in grouped.items():
-        m, n, p, k, label = key
-        if m != method or label != "recall":
-            continue
-        points[(n, p)].append((k, sum(vals) / len(vals)))
-    for (n, p), pts in sorted(points.items()):
-        pts.sort()
-        ks = [t[0] for t in pts]
-        ys = [t[1] for t in pts]
-        ax_recall.plot(ks, ys, marker="o", label=f"n={n}, p={p}")
-    ax_recall.set_xlabel("top_k")
-    ax_recall.set_ylabel("candidate recall (vs planted truth)")
-    ax_recall.set_title("b  candidate recall vs budget")
-    ax_recall.set_ylim(0, 1.05)
-    ax_recall.legend(fontsize=8)
+    panel_letter(ax_a, "a", dx=-0.005, dy=0.95)
+    panel_letter(ax_b, "b")
+    panel_letter(ax_c, "c")
+    panel_letter(ax_d, "d")
 
-    # Panel c: edge overlap vs SparCC per (n, p) for falcon_sr_fast
-    points = defaultdict(list)
-    for key, vals in grouped.items():
-        m, n, p, k, label = key
-        if m != method or label != "overlap":
-            continue
-        points[(n, p)].append((k, sum(vals) / len(vals)))
-    for (n, p), pts in sorted(points.items()):
-        pts.sort()
-        ks = [t[0] for t in pts]
-        ys = [t[1] for t in pts]
-        ax_overlap.plot(ks, ys, marker="s", label=f"n={n}, p={p}")
-    ax_overlap.set_xlabel("top_k")
-    ax_overlap.set_ylabel("edge overlap vs SparCC")
-    ax_overlap.set_title("c  edge overlap vs SparCC")
-    ax_overlap.set_ylim(0, 1.05)
-    ax_overlap.legend(fontsize=8)
-
-    # Panel d: wall-clock vs p, log-log, per method
-    methods = sorted({key[0] for key in grouped_time})
-    for m in methods:
-        ps, ts = [], []
-        for (mm, n, p, k), seconds in grouped_time.items():
-            if mm != m:
-                continue
-            ps.append(p)
-            ts.append(sum(seconds) / len(seconds))
-        if not ps:
-            continue
-        order = sorted(zip(ps, ts))
-        ax_time.plot([x for x, _ in order], [y for _, y in order],
-                     marker="o", label=m)
-    ax_time.set_xscale("log")
-    ax_time.set_yscale("log")
-    ax_time.set_xlabel("p (features)")
-    ax_time.set_ylabel("wall-clock seconds")
-    ax_time.set_title("d  wall-clock vs p")
-    ax_time.legend(fontsize=8)
-
-    fig.tight_layout()
-    fig.savefig(OUT_DIR / "figure1.svg")
-    fig.savefig(OUT_DIR / "figure1.pdf")
-    print(f"Wrote {OUT_DIR / 'figure1.svg'} and figure1.pdf")
+    save_pub(fig, OUT_DIR / "figure1")
+    print("Wrote figure1.{svg,pdf,tiff}")
 
 
 if __name__ == "__main__":
