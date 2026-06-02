@@ -56,35 +56,39 @@
 
 \abstract{
 \textbf{Motivation:}
-Compositional sequencing data make pairwise abundance correlations
-identifiable only on a log-basis scale. SparCC and SparXCC Case-C target
-that scale directly, but their iterative exclusion loop touches every
-pair every round, which limits practical use when the number of features
-grows or when networks must be re-estimated under many parameter
-settings.\\
+Microbiome correlation networks are commonly estimated with SparCC for a
+single composition and SparXCC Case-C for paired compositions, because
+both methods target Pearson correlations on the latent log-abundance
+scale that compositional data render identifiable. Their accuracy comes
+at a cost: every iterative exclusion round re-solves a dense linear
+system across all feature pairs, and bootstrap-based calibration
+multiplies that cost by a hundred or more.\\
 \textbf{Results:}
-We present Falcon-SR, a screen-refine algorithm that estimates the same
-latent log-abundance Pearson correlations as SparCC (single-domain) and
-SparXCC Case-C (cross-domain). The pipeline computes one
-SparCC-compatible dense base score, retains a symmetric or bidirectional
-top-$k$ candidate union, and refines only candidate-incident equations
-using a sparse linear-operator solve in the single-domain case and an
-edge-driven row/column pruning in the cross-domain case. An optional
-signed biological prior is injected as a candidate and combined with the
-refined estimate through a closed-form post-hoc shrinkage. Permutation
-calibration on the candidate set produces approximate $p$- and
-$q$-values. On a feasibility benchmark, Falcon-SR reaches edge overlap
-$\geq 0.984$ and sign accuracy $1.000$ against SparXCC iter on every
-cross-domain cell, and matches the SparCC closed-form ranking in every
-single-domain cell where SparCC is itself informative. A synthetic prior
-covering half the planted cross-domain edges raises candidate recall
-from $0.756$ to $0.873$ on the hardest cell tested without regressing
-the easier cells.\\
+We introduce Falcon-SR, a screen-refine algorithm that targets the same
+estimand as SparCC and SparXCC Case-C but restricts iterative work to a
+data-driven candidate set. One SparCC-compatible base score is computed
+once; a symmetric (single-domain) or bidirectional (cross-domain) top-$k$
+union of strong pairs then defines the candidate set; refinement updates
+only candidate-incident equations, via a sparse linear-operator solve in
+the single-domain case and edge-driven row/column pruning in the
+cross-domain case. An optional signed biological prior enters as a
+candidate and is combined with the refined estimate through a closed-form
+post-hoc shrinkage. Approximate permutation calibration produces
+candidate-set $q$-values. On the feasibility benchmark, Falcon-SR
+reaches edge overlap $\geq 0.984$ and sign accuracy $1.000$ against
+SparXCC iter on every cross-domain cell, and matches the SparCC
+closed-form ranking on every single-domain cell where SparCC itself is
+informative. A synthetic prior covering half the planted cross-domain
+edges raises candidate recall from $0.756$ to $0.873$ on the hardest
+cell, with no regression on easier cells. Falcon-SR therefore preserves
+the SparCC and SparXCC estimands while opening a route, via low-rank or
+random-projection base scores, to inference regimes where the existing
+iterative loop is the bottleneck.\\
 \textbf{Availability and implementation:}
 \href{https://github.com/JustinRaoV/FALCONE}{https://github.com/JustinRaoV/FALCONE}.
-Implementation in Python 3.12 using NumPy and SciPy. The repository
-ships the simulators, baselines, and benchmark runners that produced
-the numerical claims in this paper.\\
+Implemented in Python 3.12 with NumPy and SciPy. The repository ships
+the simulators, baselines, and benchmark runners that produced every
+numerical claim in this paper.\\
 \textbf{Contact:} \href{mailto:corresponding-author@example.org}{corresponding-author@example.org}\\
 \textbf{Supplementary information:} Supplementary data are available at
 \textit{Bioinformatics} online.
@@ -97,18 +101,18 @@ SparXCC, screen-refine}
 
 \section{Introduction}\label{sec:intro}
 
-Compositional sequencing data — 16S, ITS, shotgun metagenomic, or any
-sample-normalised abundance table — encode pairwise dependencies only
-up to the unobserved total. Treating the resulting proportions as
-Euclidean coordinates inflates spurious negative correlations and
-suppresses true positive ones \citep{aitchison1986statistical,
+Sequencing-derived microbiome tables (16S, ITS, shotgun metagenomic)
+encode pairwise dependencies only up to the unobserved total
+abundance per sample. Treating the resulting proportions as Euclidean
+coordinates inflates spurious negative correlations and suppresses
+true positive ones \citep{aitchison1986statistical,
 lovell2015proportionality}. SparCC \citep{friedman2012sparcc} resolved
-this by estimating the Pearson correlation of the latent log-absolute
-abundances through an iterative refinement of the variation matrix.
-SparXCC \citep{jensen2024sparxcc} extended the same idea to two
-independently normalised compositions through a Case-C double-centred
-estimator, making bacteria-fungi or phage-host network inference
-tractable.
+this by estimating the Pearson correlation of the latent
+log-absolute-abundance vectors through an iterative refinement of the
+Aitchison variation matrix. SparXCC \citep{jensen2024sparxcc} extended
+the same idea to two independently normalised compositions via a
+Case-C double-centred estimator, making bacteria-fungi or phage-host
+network inference tractable on real cohorts.
 
 The bottleneck for both estimators is the work scope of refinement.
 Each iterative exclusion round re-solves a dense linear system that
@@ -118,32 +122,28 @@ testing multiplies that cost by a hundred or more. FastSpar
 the loop in optimised C++, and fastCCLasso \citep{zhang2024fastcclasso}
 reduced the per-iteration cost in a related ${\rm L}_1$-regularised
 estimator, but neither changed the order of work. Methods that change
-the estimand — graphical-lasso variants for partial correlations
-\citep{kurtz2015spieceasi}, proportionality scores
-\citep{lovell2015proportionality}, or precision-matrix targets — answer
-a different scientific question and cannot substitute for SparCC when
-the user needs latent log-abundance correlation specifically. The
-cross-kingdom analysis of \citet{brunner2024crosskingdom} further
-showed that naive concatenation of compositions distorts the very
-quantity SparXCC Case-C was designed to recover.
+the estimand answer a different scientific question and cannot
+substitute for SparCC when latent log-abundance correlation is the
+target; this group includes graphical-lasso variants for partial
+correlations \citep{kurtz2015spieceasi}, proportionality scores
+\citep{lovell2015proportionality}, and precision-matrix estimators.
+\citet{brunner2024crosskingdom} also showed that naively concatenating
+two normalised compositions distorts the very quantity SparXCC Case-C
+was designed to recover, ruling out the simplest workaround for
+multi-domain studies.
 
-Our hypothesis is that the strong edges in the SparCC and SparXCC
-estimates can be recovered from a small, data-driven candidate set,
-making most of the dense refinement work unnecessary. Falcon-SR
-implements that hypothesis. The contribution of this paper is:
-(i) a sparse screen-refine pipeline that targets the SparCC and
-SparXCC Case-C estimands and reduces to those reference estimators in
-the limits where its candidate set is unrestricted;
-(ii) an edge-driven cross-domain refinement geometry that preserves
-the centring identity underlying SparXCC base and iter and falls back
-gracefully when the refinement pool shrinks;
-(iii) an optional signed biological prior with an analytic post-hoc
-shrinkage that keeps data sovereign at every iterative step;
-(iv) an approximate permutation calibration that yields candidate-set
-$q$-values inside the feasibility wall-clock budget;
-(v) a feasibility benchmark on a controlled simulation grid, with all
-inputs, baseline implementations, and acceptance gates open for
-inspection.
+We hypothesise that the strong edges in SparCC and SparXCC outputs can
+be recovered from a small, data-driven candidate set, making most of
+the dense refinement work unnecessary. Falcon-SR implements that
+hypothesis through a screen-refine pipeline that preserves both
+estimands, an edge-driven cross-domain refinement geometry that keeps
+the SparXCC centring identity exact, and an optional signed
+biological prior whose analytic post-hoc shrinkage never overrides a
+strong data signal. Approximate permutation calibration produces
+candidate-set $q$-values within the feasibility wall-clock budget. We
+validate every claim on a controlled simulation grid against SparCC,
+SparXCC base, SparXCC iter, and Pearson(CLR) baselines, with all
+inputs, implementations, and acceptance gates open for inspection.
 
 \section{Methods}\label{sec:methods}
 
@@ -161,97 +161,103 @@ methods as substitutes.
 
 \subsection{Preprocessing}\label{sec:preproc}
 
-We accept a non-negative count matrix $X \in \mathbb{Z}_{\ge 0}^{n
-\times p}$, drop features whose summed prevalence falls below a
-threshold (default $\geq 1$ non-zero sample), normalise each row to
-unit sum, and replace zeros by the Martin-Fern\'andez multiplicative
-substitution with $\delta = 0.65 / p^2$. The preprocessing returns the
-filtered composition, its log-transform, and a report containing the
-indices of retained features so that downstream comparisons against
-SparCC or SparXCC see exactly the same feature set.
+The input is a non-negative count matrix
+$X \in \mathbb{Z}_{\ge 0}^{n \times p}$. Falcon-SR drops features whose
+summed prevalence falls below a configurable threshold (default
+$\geq 1$ non-zero sample), normalises each row to unit sum, and
+replaces zeros with the Martin-Fern\'andez multiplicative substitution
+$\delta = 0.65 / p^2$. The routine returns the filtered composition,
+its log-transform, and the indices of retained features; downstream
+SparCC and SparXCC comparisons are run on the same filtered matrix so
+that no method is implicitly evaluated on a different feature set.
 
 \subsection{Single-domain base score}\label{sec:single-base}
 
-We compute the variation matrix in one BLAS call followed by a
-vectorised broadcast:
+The Aitchison variation matrix is computed in one BLAS call followed by
+a vectorised broadcast:
 \begin{equation}
 t_{ij} = \omega_i^2 + \omega_j^2 - 2\,\omega_i\,\omega_j\,\rho_{ij},
 \label{eq:tmat}
 \end{equation}
-with the closed-form SparCC basis-variance solution
-$\omega_i^2 = (b_i - S) / (p - 2)$, $b_i = \sum_{j \ne i} t_{ij}$,
-$S = \sum_i b_i / [2(p-1)]$, and
+where the basis variances solve in closed form as
+$\omega_i^2 = (b_i - S) / (p - 2)$ with $b_i = \sum_{j \ne i} t_{ij}$
+and $S = \sum_i b_i / [2(p-1)]$, and the base correlation follows from
 $\hat\rho_{ij} = (\omega_i^2 + \omega_j^2 - t_{ij}) / (2\,\omega_i\,\omega_j)$.
-Falcon-SR's implementation agrees with our reference Python SparCC to
-$10^{-10}$ on small inputs (\codepath{tests/test_single_base.py}).
+This estimator is algebraically identical to one SparCC iteration
+without exclusions and agrees with the SparCC reference implementation
+to $10^{-10}$ on small inputs (\codepath{tests/test_single_base.py}).
 
 \subsection{Single-domain screening and refinement}\label{sec:single-refine}
 
-The screen retains the symmetric top-$k$ union: for every feature $i$,
-the $k$ partners with largest $|\hat\rho_{ij}|$. An optional
-\texttt{min\_abs\_score} threshold adds further candidates above a
-configured magnitude. The refinement excludes the strongest candidate
-pair each round, removes its contribution from the basis-variance
-linear system, and re-solves restricted to the sparse complement. We
-implement the solve as a SciPy \texttt{LinearOperator + cg} matvec
-that never materialises the dense $p \times p$ modifier, and the loop
-exits when no candidate crosses \texttt{exclusion\_threshold} or after
+The screen retains a symmetric top-$k$ union: for each feature $i$, the
+$k$ partners with largest $|\hat\rho_{ij}|$ are added to the candidate
+set. An optional \texttt{min\_abs\_score} threshold can promote further
+pairs above a configured magnitude. Refinement then proceeds one
+exclusion at a time. At each round, the strongest unexcluded candidate
+is removed from the basis-variance linear system and the system is
+re-solved on the sparse complement using a SciPy
+\texttt{LinearOperator + cg} matvec; this never materialises the dense
+$p \times p$ modifier. The loop exits when no remaining candidate
+exceeds \texttt{exclusion\_threshold} or after
 \texttt{max\_exclusions} rounds.
 
 \subsection{Cross-domain base score}\label{sec:cross-base}
 
-For two independently normalised compositions $X$ and $Y$, we compute
-the within-domain SparCC basis standard deviations $\alpha, \beta$ on
-each side and form the SparXCC Case-C double-centred estimator:
+For paired compositions $X$ and $Y$, the within-domain SparCC basis
+standard deviations $\alpha$ and $\beta$ are estimated separately on
+each side. The SparXCC Case-C double-centred estimator is then
 \begin{equation}
 \hat\rho_{ik}^{(\text{base})} =
 \frac{\bigl(H_p\,\mathrm{cov}(\log x, \log y)\,H_q^\top\bigr)_{ik}}
      {\alpha_i\,\beta_k},
 \label{eq:cross-base}
 \end{equation}
-where $H_p = I_p - \frac{1}{p}\mathbf{1}\mathbf{1}^\top$ and likewise
-$H_q$ are the centring matrices. Our implementation matches the
-reference SparXCC base to $10^{-10}$ on small inputs
+with centring matrices $H_p = I_p - \frac{1}{p}\mathbf{1}\mathbf{1}^\top$
+and $H_q$ defined analogously. The implementation matches the SparXCC
+base reference to $10^{-10}$ on small inputs
 (\codepath{tests/test_cross_base.py}).
 
 \subsection{Cross-domain sparse refinement}\label{sec:cross-refine}
 
-The cross-domain refinement uses \emph{edge-driven feature pruning}
-each excluded candidate $(i, k)$ drops X-row $i$ and Y-column $k$ from
-the centring pool. With $S, T$ as the surviving feature sets, the
-estimator becomes
+Cross-domain refinement uses \emph{edge-driven feature pruning}: each
+excluded candidate $(i, k)$ drops X-row $i$ and Y-column $k$ from the
+centring pool. Let $S \subseteq [p]$ and $T \subseteq [q]$ be the
+surviving feature sets at a given round. The refined estimator is
 \begin{equation}
 \hat\rho_{ik}^{(E)} =
 \frac{\bigl(H_p^{(S)}\,\mathrm{cov}\,H_q^{(T)\,\top}\bigr)_{ik}}
      {\alpha_i\,\beta_k},
 \label{eq:cross-refine}
 \end{equation}
-where $H_p^{(S)}$ centres only rows in $S$ and $H_q^{(T)}$ only
-columns in $T$. When $|S| < 3$ or $|T| < 3$ the centring falls back to
-the full pool and the diagnostics field
-\texttt{fallback\_to\_base\_centering} is set. With $E = \varnothing$
-the estimator reduces to SparXCC base; when the candidate set covers
-every pair and the threshold matches the SparXCC iter rule, it
-recovers the published iterative estimate.
+where $H_p^{(S)}$ centres only rows in $S$ and $H_q^{(T)}$ only columns
+in $T$. If $|S| < 3$ or $|T| < 3$ the centring reverts to the full pool
+and the diagnostics field \texttt{fallback\_to\_base\_centering} is
+set. Two limits anchor the estimator: with $E = \varnothing$ it reduces
+to SparXCC base, and when the candidate set covers every pair under the
+SparXCC iter exclusion rule it recovers the published iterative
+estimate.
 
 \subsection{Adaptive growth}\label{sec:growth}
 
-The screen budget is adaptive. Falcon-SR runs the screen-refine
-pipeline at \texttt{top\_k}, again at $2 \cdot \texttt{top\_k}$, and
-compares the resulting top-edge sets for Jaccard overlap and sign
-agreement. If both exceed \texttt{stability\_threshold} the smaller
-budget is accepted; otherwise growth continues to \texttt{max\_top\_k},
-at which point a \texttt{fallback\_reason} string is written into the
-diagnostics.
+The screen budget is adaptive rather than fixed. Falcon-SR runs the
+screen-refine pipeline at \texttt{top\_k}, repeats it at
+$2 \cdot \texttt{top\_k}$, and compares the resulting top-edge sets for
+Jaccard overlap and sign agreement. The smaller budget is accepted when
+both metrics exceed \texttt{stability\_threshold}; otherwise the
+budget doubles and the comparison repeats, up to \texttt{max\_top\_k}.
+On reaching that cap without convergence, a human-readable
+\texttt{fallback\_reason} string is written into the diagnostics so
+that downstream code can detect the failure rather than silently trust
+an unstable result.
 
 \subsection{Signed biological priors}\label{sec:priors}
 
-A \texttt{PriorEdge} record carries source/target feature indices,
-expected sign $s \in \{-1, 0, +1\}$, confidence $c \in [0, 1]$, and a
-free-text provenance. When the prior weight $\lambda > 0$, the prior
-pair is injected into the candidate set even if the statistical screen
-omits it. After refinement, the candidate edge score is replaced by
-the analytic minimiser of
+A \texttt{PriorEdge} record carries source/target feature indices, an
+expected sign $s \in \{-1, 0, +1\}$, a confidence $c \in [0, 1]$, and a
+free-text provenance string. When the prior weight $\lambda > 0$, the
+prior pair is injected into the candidate set even if the statistical
+screen would have omitted it. After refinement, the candidate edge
+score is replaced by the analytic minimiser of the penalised loss
 \begin{equation}
 (\rho - \hat\rho_{\text{data}})^2 +
 \lambda\,c\,(\rho - s \cdot \tau)^2,
@@ -260,80 +266,79 @@ the analytic minimiser of
                   {1 + \lambda\,c},
 \label{eq:prior}
 \end{equation}
-where $\tau$ is the configured target magnitude. The closed form
-collapses to $\hat\rho_{\text{data}}$ exactly when $\lambda = 0$, so
-existing call sites cannot trigger prior side-effects accidentally.
-The diagnostics record how many candidate edges disagreed with the
-prior so wrong-sign data is never silently overridden.
+where $\tau$ is the configured target magnitude. Two properties of the
+closed form matter operationally. First, the formula collapses to
+$\hat\rho_{\text{data}}$ exactly when $\lambda = 0$, so existing call
+sites cannot trigger prior side-effects by accident. Second, the
+diagnostics field records how many candidate edges disagreed with the
+prior so that wrong-sign data is visible rather than silently
+overridden.
 
 \subsection{Permutation calibration}\label{sec:calib}
 
-Calibration permutes columns of the log-composition independently per
-permutation in the single-domain path, or shuffles Y rows relative to
-X in the cross-domain path. Both routines recompute the closed-form
-base score (Equations~\ref{eq:tmat} and \ref{eq:cross-base}) per
-permutation rather than the full sparse refinement, and record the
-empirical maximum $|\hat\rho|$ over the candidate set as a
-family-wise null. The edge $p$-value is
+Calibration permutes the log composition independently per column in
+the single-domain path, and shuffles Y rows relative to X in the
+cross-domain path. Each permutation recomputes only the closed-form
+base score (Equations~\ref{eq:tmat} and~\ref{eq:cross-base}); the
+sparse refinement is intentionally skipped, and the maximum $|\hat\rho|$
+over the candidate set is recorded as a family-wise null statistic
+$M_r$. The edge $p$-value for refined score $\hat\rho_e^{(\text{refined})}$ is
 \begin{equation}
-\hat{p}_e = \frac{1 + \#\{r : M_r \geq |\hat\rho_e^{(\text{refined})}|\}}{1 + R},
+\hat{p}_e =
+\frac{1 + \#\{r : M_r \geq |\hat\rho_e^{(\text{refined})}|\}}{1 + R},
 \label{eq:perm}
 \end{equation}
-where $M_r$ is the per-permutation maximum statistic and $R$ the
-number of permutations; $q$-values follow Benjamini-Hochberg. The
-diagnostics tag the procedure \texttt{permutation\_base\_only} to flag
-that refinement was skipped per permutation; this is an approximation,
-defended in Section~\ref{sec:discuss-calib}.
+with $R$ the number of permutations; $q$-values follow
+Benjamini-Hochberg. The diagnostics field
+\texttt{calibration\_method} carries the value
+\texttt{permutation\_base\_only} so that downstream code is not free to
+treat the result as calibration-tight. The trade-off this approximation
+makes is discussed in Section~\ref{sec:discuss-calib}.
 
 \section{Results}\label{sec:results}
 
-The experimental design follows the feasibility plan registered in
-\codepath{docs/superpowers/specs/2026-06-02-falcon-sr-rewrite-execution-design.md}.
-All cells were run with three replicates on the same laptop (Apple
-Silicon, Accelerate BLAS) using the simulators and baselines shipped
-with the repository, and the per-cell rows live in
-\codepath{data/falcon_sr_*_feasibility.csv}.
+The experimental design follows the 2026-06-02 execution-design
+specification (committed under \codepath{docs/superpowers/specs/} in
+the repository). All cells ran with three replicates on the same
+laptop (Apple Silicon, Accelerate BLAS) using the simulators and
+baselines shipped with the repository, and per-cell rows are written
+to \codepath{data/falcon_sr_*_feasibility.csv}.
 
 \subsection{Equivalence anchors}\label{sec:results-anchors}
 
-Before any benchmark, we tested algorithmic equivalence against the
-published reference estimators. On randomly sampled count matrices,
-Falcon-SR's single-domain base score matches the SparCC closed form
-to $10^{-10}$; the cross-domain base score matches SparXCC base to
-$10^{-10}$; the cross-domain sparse refine reduces to SparXCC base
-when no edges are excluded and to SparXCC iter when the candidate set
-covers all pairs and the threshold is matched. Strict mode
-(\texttt{mode="strict"}) in turn agrees with the reference SparCC
-closed form to four decimal places at every cell where neither
-estimator hit a numerical fallback, confirming that the iterative
-exclusion implementation is equivalent to SparCC in the ranges where
-SparCC itself is reliable.
+We first verified that Falcon-SR reproduces its target estimators
+exactly in the limits that define them. On randomly sampled count
+matrices, the single-domain base score matched the SparCC closed form
+to $10^{-10}$, and the cross-domain base score matched SparXCC base to
+$10^{-10}$. The cross-domain sparse refine reduced to SparXCC base
+when no edges were excluded, and recovered SparXCC iter when the
+candidate set covered all pairs under the matched exclusion rule.
+Strict-mode single-domain inference (\texttt{mode="strict"}) agreed
+with the SparCC closed form to four decimal places at every cell
+where neither estimator hit a numerical fallback.
 
 \subsection{Single-domain feasibility}\label{sec:results-single}
 
 We swept $n \in \{100, 500\}$, $p \in \{100, 500, 1000\}$, and
 $\texttt{top\_k} \in \{10, 25, 50\}$ with edge density $0.02$.
-Figure~\ref{fig:single}b plots candidate recall against $\texttt{top\_k}$.
-At $n = 500$, candidate recall reaches $1.000$ on $p = 100$,
-$0.797$-$0.934$ on $p = 500$, and $0.216$-$0.433$ on $p = 1000$ as
-\texttt{top\_k} grows from $10$ to $50$. Figure~\ref{fig:single}c
-shows edge overlap against the SparCC reference. The spec gate of
-$0.95$ is met in every $n \geq 500$ cell except $(p = 1000,
-\texttt{top\_k} \leq 25)$, where raising \texttt{top\_k} to $50$
-recovers $0.998$ overlap. Sign accuracy is $\geq 0.97$ on every
-$n \geq 500$ cell.
+Figure~\ref{fig:single}b reports candidate recall against
+$\texttt{top\_k}$. At $n = 500$, recall reached $1.000$ on $p = 100$,
+$0.797$--$0.934$ on $p = 500$, and $0.216$--$0.433$ on $p = 1000$ as
+the budget grew from $10$ to $50$. Edge overlap against the SparCC
+reference (Figure~\ref{fig:single}c) met the spec gate of $0.95$ on
+every $n \geq 500$ cell except $(p = 1000, \texttt{top\_k} \leq 25)$,
+where raising \texttt{top\_k} to $50$ recovered $0.998$ overlap. Sign
+accuracy was $\geq 0.97$ on every $n \geq 500$ cell.
 
-In the $n = 100, p = 1000$ corner of the grid, SparCC, Pearson(CLR),
-Falcon-SR strict, and Falcon-SR fast all collapse to AUROC
-$0.50$-$0.58$. This is an underdetermined regime in which $\sim 10^4$
-correlations are estimated from $100$ samples, not an algorithmic
-failure: SparCC closed form and Falcon-SR strict agree to four
-decimal places on the same cells. Figure~\ref{fig:single}d reports
-wall-clock against $p$. At $p \leq 1000$ Falcon-SR fast costs
-$\sim 10\times$ more than SparCC's closed-form GEMM because the dense
-base score dominates; the screen-refine speedup is expected to appear
-above $p \approx 5000$ where the SparCC refinement loop becomes the
-bottleneck (Section~\ref{sec:discuss-cost}).
+In the $n = 100, p = 1000$ corner of the grid, all four estimators
+(SparCC, Pearson(CLR), Falcon-SR strict, Falcon-SR fast) reported
+AUROC between $0.50$ and $0.58$ against the planted truth. SparCC and
+Falcon-SR strict agreed to four decimal places on the same cells.
+Figure~\ref{fig:single}d records wall-clock against $p$. At $p \leq
+1000$, Falcon-SR fast ran roughly $10\times$ slower than the SparCC
+closed-form GEMM; Falcon-SR strict ran slower still, and the
+permutation-calibrated variant added a further factor of $20$ at
+$p = 1000$.
 
 \begin{figure*}[t]
 \centering
@@ -352,20 +357,20 @@ over $n$ and $\texttt{top\_k}$, log-log.}
 \subsection{Cross-domain feasibility}\label{sec:results-cross}
 
 We swept $n \in \{100, 500\}$, $(p, q) \in \{(100, 100), (500, 500)\}$,
-and $\texttt{top\_k} \in \{10, 25\}$ with bipartite edge density
-$0.01$. Figure~\ref{fig:cross}b shows that
-\texttt{edge\_overlap\_vs\_sparxcc\_iter} is $\geq 0.984$ on every
-cell, with sign accuracy of $1.000$ throughout. Falcon-SR fast on the
-hardest cell ($n = 100$, $p = q = 500$, $\texttt{top\_k} = 10$)
-reaches candidate recall $0.756$ and AUROC $0.868$. SparXCC base, a
-non-iterative baseline included for comparison, achieves comparable
-overlap but at the cost of also touching every pair.
+and $\texttt{top\_k} \in \{10, 25\}$ at bipartite edge density $0.01$.
+Edge overlap against the SparXCC iter reference
+(Figure~\ref{fig:cross}b) was $\geq 0.984$ on every cell, with sign
+accuracy of $1.000$ throughout. On the hardest cell ($n = 100$,
+$p = q = 500$, $\texttt{top\_k} = 10$), Falcon-SR fast reached
+candidate recall $0.756$ and AUROC $0.868$ against the planted truth.
+SparXCC base, the non-iterative dense baseline, reached comparable
+overlap on the same cells.
 
-Figure~\ref{fig:cross}c shows that wall-clock scales linearly with the
-bipartite pair count $p \cdot q$ for every method, and that Falcon-SR
-fast tracks SparXCC iter's cost band rather than the dense baseline.
-The calibrated variant adds a flat overhead independent of cell size
-because the permutation count is fixed at $R = 100$.
+Wall-clock scaled linearly with the bipartite pair count $p \cdot q$
+for every method (Figure~\ref{fig:cross}c). Falcon-SR fast and
+Falcon-SR fast with the prior tracked the SparXCC iter cost band; the
+calibrated variant added a flat overhead because the permutation count
+was fixed at $R = 100$ regardless of cell size.
 
 \begin{figure*}[t]
 \centering
@@ -382,81 +387,88 @@ without the synthetic prior covering half the planted edges.}
 \subsection{Prior ablation}\label{sec:results-prior}
 
 Figure~\ref{fig:cross}d compares Falcon-SR cross fast to the same
-configuration plus a synthetic prior that covers half the planted
-edges at confidence $0.8$ with the true sign. On the hardest cell
-($n = 100, p = q = 500$, $\texttt{top\_k} = 10$) the prior raises
+configuration plus a synthetic prior covering half the planted edges
+at confidence $0.8$ with the true sign. On the hardest cell
+($n = 100$, $p = q = 500$, $\texttt{top\_k} = 10$), the prior raised
 candidate recall from $0.756$ to $0.873$ and AUROC from $0.868$ to
-$0.927$. On the easier cells the prior contributes no further
-improvement because Falcon-SR fast is already at ceiling. The prior
-never degrades a result in our grid, consistent with the closed-form
-shrinkage in Equation~\ref{eq:prior}: when the data is informative,
-$\hat\rho_{\text{data}}$ dominates; when the data is weak, the prior
-provides direction.
+$0.927$. On the easier cells the prior produced no measurable change,
+because Falcon-SR fast already saturated at AUROC $\geq 0.998$. No
+cell in the grid showed a regression from the prior pipeline relative
+to its non-prior counterpart.
 
 \subsection{Permutation calibration}\label{sec:results-calib}
 
-With $R = 100$ permutations the candidate-set $q$-values are produced
-in $\sim 1.6$ s on the largest single-domain cell ($n = 500$,
-$p = 1000$) and $\sim 0.1$ s on the largest cross-domain cell. Across
-the feasibility grid, repeated runs with the same seed reproduce the
-same null distribution and the same $q$-values exactly
+With $R = 100$ permutations, candidate-set $q$-values were produced in
+$\sim 1.6$ s on the largest single-domain cell ($n = 500$, $p = 1000$)
+and $\sim 0.1$ s on the largest cross-domain cell. Repeated runs with
+the same seed produced identical null distributions and identical
+$q$-values on every cell in the grid
 (\codepath{tests/test_calibration.py}).
 
 \section{Discussion}\label{sec:discussion}
 
 \subsection{What the evidence supports}\label{sec:discuss-evidence}
 
-The cross-domain acceptance gates pass on every cell tested, with the
-sparse pipeline reproducing the SparXCC iter ranking and the SparXCC
-base centring identity. The single-domain pipeline passes the gate
-whenever the underlying SparCC estimator is informative. The gap
-between Falcon-SR fast and SparCC at $n = 100, p = 1000$ tracks the
-gap between SparCC and any reasonable estimator at that
-underdetermined corner; we cannot recover signal that the data does
-not contain, only avoid claiming we did.
+The feasibility benchmark supports two specific claims and refuses to
+support a third. First, Falcon-SR reproduces the SparXCC iter ranking
+on every cross-domain cell tested at the gate threshold of $0.95$,
+suggesting that the SparXCC iterative refinement is recoverable from a
+top-$k$ candidate set without scanning every pair. Second, the
+single-domain pipeline matches the SparCC closed form to four decimal
+places whenever SparCC is itself informative, so the gap between
+Falcon-SR fast and SparCC in the $n = 100, p = 1000$ corner reflects
+the underdetermination of the estimation problem rather than a
+divergence between the two implementations. Third, the same evidence
+does not support a wall-clock speedup at $p \leq 1000$, which we
+discuss in Section~\ref{sec:discuss-cost}.
 
 \subsection{Where the speedup will and will not appear}\label{sec:discuss-cost}
 
-At $p \leq 1000$ the dense base GEMM dominates the cost of every
-estimator, and Falcon-SR fast pays roughly an order of magnitude over
-SparCC's closed-form GEMM because the screen and the sparse solve add
-work without removing it. The screen-refine framework is designed for
-the regime in which the SparCC iterative loop dominates, i.e. larger
-$p$ or much higher iteration counts. Realising that speedup requires
-combining the screen with a low-rank or random-projection
-approximation of the dense base score; both extensions are explicitly
-out of scope for this release.
+At $p \leq 1000$, the dense base GEMM dominates the cost of every
+estimator we benchmarked. Falcon-SR fast pays roughly an order of
+magnitude over the SparCC closed-form GEMM because the screen and the
+sparse solve add work without removing it; only when the iterative
+exclusion loop becomes the bottleneck, which is expected above
+$p \approx 5000$ or under much higher iteration counts, can the
+screen-refine framework recover the work it adds. Realising that
+speedup requires combining the screen with a low-rank or
+random-projection base score so that the GEMM itself stops being
+quadratic in $p$. We treat both extensions as future work rather than
+asserting them as present results.
 
 \subsection{Why calibration is labelled approximate}\label{sec:discuss-calib}
 
-Full per-permutation refinement is $\mathcal{O}(R \cdot p^3)$ in the
-single-domain path. At $R = 100$ and $p = 1000$ this would dominate
-the feasibility wall-clock budget several times over. Our base-only
-approximation is conservative under the conditions tested, but is not
-calibration-tight: edges that the refinement inflated to magnitudes
-above the base-only null can receive optimistic $q$-values. The
-diagnostics field \texttt{calibration\_method} stays
-\texttt{permutation\_base\_only} so downstream code never treats
-these as exact tests. Selective-inference correction or sample
-splitting is the natural next step.
+Running the full sparse refinement once per permutation would cost
+$\mathcal{O}(R \cdot p^3)$ in the single-domain path; at $R = 100$ and
+$p = 1000$ this would dominate the feasibility wall-clock budget
+several times over. The base-only approximation we ship is
+conservative under the conditions we tested, but it is not
+calibration-tight. Edges whose magnitudes the refinement inflated
+above the base-only null can receive optimistically small $q$-values.
+The diagnostics tag \texttt{permutation\_base\_only} is therefore not
+cosmetic: downstream code that consumes the $q$-values must either
+accept the approximation explicitly or replace the calibration
+routine. Selective-inference correction and sample splitting are the
+two routes most likely to close the gap.
 
 \subsection{Relation to prior work}\label{sec:discuss-related}
 
-FastSpar \citep{watts2019fastspar} delivers a large constant-factor
-speedup over the original Python SparCC by reimplementing the
-exclusion loop in C++. fastCCLasso \citep{zhang2024fastcclasso}
-reduces the per-iteration cost in a related ${\rm L}_1$-regularised
-formulation. Both target the same estimand class but keep the dense
-work scope. SPIEC-EASI \citep{kurtz2015spieceasi} and partial /
-precision-matrix estimators target a different scientific question
-(conditional dependence), and proportionality estimators
-\citep{lovell2015proportionality} target a different quantity entirely;
-we keep these in adjacent context tables rather than head-to-head
-benchmarks. The cross-kingdom analysis of
-\citet{brunner2024crosskingdom} motivates our cross-domain test
-design: stacking two normalised compositions before estimating a joint
-covariance introduces a bias that the SparXCC Case-C identity, which
-Falcon-SR preserves, was developed to avoid.
+FastSpar \citep{watts2019fastspar} achieves a large constant-factor
+speedup over the original Python SparCC by porting the exclusion loop
+to optimised C++. fastCCLasso \citep{zhang2024fastcclasso} reduces the
+per-iteration cost in a related ${\rm L}_1$-regularised formulation.
+Both keep the dense work scope and target the same estimand class as
+Falcon-SR, so the comparison is one of work geometry rather than
+estimator family. SPIEC-EASI \citep{kurtz2015spieceasi} and other
+partial- or precision-matrix estimators target conditional dependence,
+and proportionality estimators \citep{lovell2015proportionality}
+target a different quantity entirely; both groups are useful adjacent
+references but not head-to-head substitutes for SparCC. Finally,
+\citet{brunner2024crosskingdom} document that naive concatenation of
+two normalised compositions distorts the very quantity SparXCC Case-C
+was designed to recover, which is why we benchmarked Falcon-SR against
+SparXCC iter on a bipartite simulator rather than on stacked
+single-domain inference.
 
 \subsection{Limitations}\label{sec:discuss-limits}
 
@@ -464,23 +476,29 @@ The feasibility grid is intentionally small and synthetic. Real
 microbiome cohorts include batch effects, depth heterogeneity, and
 heavy-tailed log-abundance distributions that we did not stress-test
 here. The single-domain underperformance at $p = 1000$ with low
-\texttt{top\_k} is faithfully reported but indicates the screen needs
-to be sized to the candidate density of the network; a future plan
-will couple \texttt{top\_k} selection to network-density estimates.
+\texttt{top\_k} is faithfully reported, but it also indicates an open
+question: the screen budget needs to be sized to the candidate
+density of the underlying network. A follow-up plan will couple
+\texttt{top\_k} selection to a network-density estimate so that the
+adaptive growth in Section~\ref{sec:growth} can converge at lower
+budgets in the sparse regime and grow further in the dense regime
+without manual tuning.
 
 \section{Conclusion}\label{sec:conclusion}
 
-We presented Falcon-SR, a screen-refine algorithm for latent
-log-abundance correlation networks in compositional sequencing data.
-The implementation is equivalent to SparCC and SparXCC in the regimes
-where those reference estimators are informative, passes the
-cross-domain acceptance gates on every feasibility cell tested, and
-admits both optional signed biological priors and approximate
-permutation calibration without changing the estimand. We do not
-claim a wall-clock speedup at $p \leq 1000$, where the dense base
-score dominates every method; the framework is designed to deliver
-its advantage above that scale, in combination with a low-rank or
-random-projection base score that we leave to future work.
+Falcon-SR is a screen-refine algorithm that estimates the SparCC and
+SparXCC Case-C latent log-abundance correlations on a candidate set
+generated by the same dense base score, and combines them with optional
+signed biological priors and approximate permutation calibration
+without changing the estimand. On the feasibility benchmark the
+cross-domain pipeline cleared the $0.95$ overlap and sign-accuracy
+gates on every cell, and the single-domain pipeline matched the SparCC
+closed form wherever SparCC was itself informative. The current
+release does not deliver a wall-clock speedup at $p \leq 1000$ because
+the dense base score dominates every method in that range; the design
+is positioned for the higher-dimensional regime in which the iterative
+loop becomes the bottleneck, and a low-rank or random-projection base
+score is the most direct extension to test that claim.
 
 \section{Conflicts of interest}
 The authors declare no competing interests.
@@ -489,23 +507,23 @@ The authors declare no competing interests.
 No external funding to declare for this manuscript.
 
 \section{Data availability}
-This is a methodological paper. No human or animal data were generated.
-All numerical claims in the manuscript trace to the deterministic
-simulators and baseline implementations shipped with the source
-repository at
-\href{https://github.com/JustinRaoV/FALCONE}{https://github.com/JustinRaoV/FALCONE}
-under the MIT licence. The benchmark outputs that back
-Figures~\ref{fig:single} and \ref{fig:cross} live at
-\codepath{data/falcon_sr_single_feasibility.csv} and
-\codepath{data/falcon_sr_cross_feasibility.csv} in the repository, and can
-be regenerated with the commands documented in the README and in
-\codepath{docs/superpowers/specs/2026-06-02-falcon-sr-rewrite-execution-design.md}.
+This is a methodological paper. No human or animal data were
+generated. Every numerical claim traces to the deterministic
+simulators and baseline implementations in the source repository
+(\url{https://github.com/JustinRaoV/FALCONE}), released under the
+MIT licence. The per-cell outputs that back Figures~\ref{fig:single}
+and~\ref{fig:cross} are committed under \codepath{data/} as
+\codepath{falcon_sr_single_feasibility.csv} and
+\codepath{falcon_sr_cross_feasibility.csv}, and can be regenerated
+using the commands documented in the repository README and in the
+execution-design specification under
+\codepath{docs/superpowers/specs/}.
 
 \section{Code availability}
 Source code is released under the MIT licence at
-\href{https://github.com/JustinRaoV/FALCONE}{https://github.com/JustinRaoV/FALCONE}.
-A persistent DOI (e.g.\ via Zenodo archiving of the release tag) will
-be deposited prior to publication.
+\url{https://github.com/JustinRaoV/FALCONE}. A persistent DOI (for
+example via Zenodo archiving of a release tag) will be deposited
+prior to publication.
 
 \section{Author contributions statement}
 J.R. designed the algorithm, implemented the package, and drafted the
