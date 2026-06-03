@@ -211,3 +211,28 @@ def test_alternating_loop_output_is_stable_to_reordered_ops():
     # Symmetric and finite.
     assert np.all(np.isfinite(r.covariance))
     np.testing.assert_allclose(r.covariance, r.covariance.T, atol=1e-12)
+
+
+def test_jit_and_pure_numpy_paths_agree(monkeypatch):
+    """Whether the kernel is the Numba JIT version or the pure-NumPy
+    fallback, the output Sigma must match within floating-point noise.
+    Force the pure-NumPy path by monkeypatching the kernel-availability
+    flag, run, then run with the JIT path, compare."""
+    import numpy as np
+    from falcon.estimators import weighted_sparse as ws
+    from falcon.estimators import _weighted_sparse_kernel as kern
+
+    rng = np.random.default_rng(7)
+    Z = rng.normal(0, 1, size=(60, 12))
+
+    # JIT path (if available).
+    r_jit = ws.estimate_weighted_sparse(Z, lambda_value=0.07, max_iter=80, tol=1e-7)
+
+    # Force pure-NumPy fallback.
+    monkeypatch.setattr(kern, "_NUMBA_OK", False)
+    r_np = ws.estimate_weighted_sparse(Z, lambda_value=0.07, max_iter=80, tol=1e-7)
+
+    # Outputs must agree within numerical noise (different floating-point
+    # accumulation order can give differences up to ~1e-10).
+    np.testing.assert_allclose(r_jit.covariance, r_np.covariance, atol=1e-8)
+    assert r_jit.converged == r_np.converged

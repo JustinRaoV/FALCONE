@@ -46,6 +46,11 @@ Homepage = "https://github.com/JustinRaoV/FALCONE"
 Repository = "https://github.com/JustinRaoV/FALCONE"
 Issues = "https://github.com/JustinRaoV/FALCONE/issues"
 
+[project.optional-dependencies]
+accel = [
+    "numba>=0.61,<0.63",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
