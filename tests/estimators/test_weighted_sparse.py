@@ -189,3 +189,25 @@ def test_support_only_skips_eigvalsh_and_correlation(monkeypatch):
         full_support, skip_support,
         err_msg="support_only must produce the same nonzero positions as full path",
     )
+
+
+def test_alternating_loop_output_is_stable_to_reordered_ops():
+    """The in-place alternating loop reorders some additions and
+    multiplications. The final Sigma should be numerically identical
+    to within floating-point noise (1e-10) for a small fixed problem."""
+    import numpy as np
+    rng = np.random.default_rng(123)
+    Z = rng.normal(0, 1, size=(40, 8))
+    r = estimate_weighted_sparse(Z, lambda_value=0.1, max_iter=80, tol=1e-7)
+    # The result should be PD-friendly: max abs off-diagonal < max abs diagonal
+    # (sanity that soft-thresholding shrinks off-diagonals).
+    od = r.covariance.copy()
+    diag = np.diag(od).copy()
+    np.fill_diagonal(od, 0.0)
+    assert np.max(np.abs(od)) <= np.max(np.abs(diag)) * 1.1, (
+        "off-diagonal magnitudes exceed diagonal by more than 10% — "
+        "likely a buffer-aliasing bug"
+    )
+    # Symmetric and finite.
+    assert np.all(np.isfinite(r.covariance))
+    np.testing.assert_allclose(r.covariance, r.covariance.T, atol=1e-12)

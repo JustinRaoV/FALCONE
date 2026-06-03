@@ -118,30 +118,54 @@ def estimate_weighted_sparse(
     threshold_off = lambda_value / np.maximum(W ** 2, 1e-12)
     np.fill_diagonal(threshold_off, 0.0)
 
+    # Preallocated buffers for the alternating loop. We rotate
+    # (Sigma, Sigma_new) between iterations to avoid copying.
     Sigma = S_clr.copy()
+    Sigma_new = np.empty_like(Sigma)
+    delta_buf = np.empty_like(Sigma)
+    M_buf = np.empty_like(Sigma)
+    abs_buf = np.empty_like(Sigma)
+    sign_buf = np.empty_like(Sigma)
+
     f = np.zeros(p)
     converged = False
     iterations = 0
-    for it in range(1, max_iter + 1):
-        Sigma_prev = Sigma.copy()
+    tol_sq = tol * tol  # compare squared norms to avoid the sqrt
 
+    for it in range(1, max_iter + 1):
         # Step A — closed-form offset update from R = Sigma - S_clr.
-        R = Sigma - S_clr
-        R_sum = R.sum(axis=1)
-        total = R.sum()
+        # Reuse delta_buf as R.
+        np.subtract(Sigma, S_clr, out=delta_buf)
+        R_sum = delta_buf.sum(axis=1)
+        total = delta_buf.sum()
         f = (R_sum - total / (2 * p)) / p
 
         # Step B — soft-threshold the off-diagonal of M = S_clr + f1' + 1f';
         # diagonal stays unpenalized.
-        M = S_clr + f[:, None] + f[None, :]
-        Sigma = np.sign(M) * np.maximum(np.abs(M) - threshold_off, 0.0)
-        np.fill_diagonal(Sigma, np.diag(M))
-        Sigma = 0.5 * (Sigma + Sigma.T)
+        np.add(S_clr, f[:, None], out=M_buf)
+        M_buf += f[None, :]
+        np.abs(M_buf, out=abs_buf)
+        np.subtract(abs_buf, threshold_off, out=abs_buf)
+        np.maximum(abs_buf, 0.0, out=abs_buf)
+        np.sign(M_buf, out=sign_buf)
+        np.multiply(sign_buf, abs_buf, out=Sigma_new)
+        np.fill_diagonal(Sigma_new, np.diag(M_buf))
+        # Symmetrize via temporary to avoid aliasing on the in-place add
+        # of Sigma_new + Sigma_new.T.
+        np.add(Sigma_new, Sigma_new.T, out=delta_buf)
+        np.multiply(delta_buf, 0.5, out=Sigma_new)
 
-        delta = np.linalg.norm(Sigma - Sigma_prev)
-        scale = max(np.linalg.norm(Sigma), 1e-12)
+        # Frobenius delta_sq and scale_sq via einsum (allocation-free).
+        np.subtract(Sigma_new, Sigma, out=delta_buf)
+        delta_sq = float(np.einsum("ij,ij->", delta_buf, delta_buf))
+        scale_sq = max(float(np.einsum("ij,ij->", Sigma_new, Sigma_new)), 1e-24)
+
         iterations = it
-        if delta / scale < tol:
+        # Rotate buffers: Sigma becomes the just-computed value; the old
+        # Sigma buffer is reused next iteration as Sigma_new.
+        Sigma, Sigma_new = Sigma_new, Sigma
+
+        if delta_sq / scale_sq < tol_sq:
             converged = True
             break
 
