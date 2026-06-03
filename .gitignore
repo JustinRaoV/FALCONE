@@ -33,6 +33,10 @@ ref/
 # `data/` with explicit manifest rows.
 data/bench_*.csv
 data/*_local.csv
+data/calibration_smoke_v2.csv
+data/calibration_smoke_summary_v2.json
+data/calibration_holdout_v2.csv
+data/calibration_summary_v2.json
 
 # Public-data downloads. Raw third-party archives are never committed
 # (see `data/public/*.md`). Only the pointer markdown files belong in the
