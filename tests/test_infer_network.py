@@ -162,3 +162,53 @@ def test_legacy_exports_are_removed():
     assert not hasattr(falcon, "infer_single")
     assert not hasattr(falcon, "infer_cross")
     assert not hasattr(falcon, "PriorEdge")
+
+
+from falcon.calibration import IsotonicCalibrator
+
+
+def test_infer_network_accepts_calibrator_and_populates_posterior():
+    rng = np.random.default_rng(0)
+    counts = rng.integers(1, 200, size=(80, 30))
+    cal = IsotonicCalibrator(mode="pooled")
+    cal.fit(np.linspace(0, 1, 100), np.linspace(0, 1, 100) > 0.5, scenario="any")
+    result = infer_network(
+        counts,
+        estimator="weighted_sparse",
+        selection="stability",
+        n_resamples=10,
+        seed=0,
+        calibrator=cal,
+        scenario_hint="any",
+    )
+    assert result.edges.posterior_probability is not None
+    assert result.edges.posterior_probability.shape == result.edges.scores.shape
+    assert result.diagnostics.calibration_method == "empirical_isotonic_pooled"
+    assert result.diagnostics.uncertainty_interpretation == "calibrated_posterior_pooled"
+
+
+def test_infer_network_without_calibrator_leaves_posterior_none():
+    rng = np.random.default_rng(0)
+    counts = rng.integers(1, 200, size=(80, 30))
+    result = infer_network(counts, estimator="weighted_sparse", n_resamples=10, seed=0)
+    assert result.edges.posterior_probability is None
+    assert result.diagnostics.calibration_method == "none"
+
+
+def test_infer_network_per_scenario_calibrator():
+    rng = np.random.default_rng(0)
+    counts = rng.integers(1, 200, size=(80, 30))
+    cal = IsotonicCalibrator(mode="per_scenario")
+    cal.fit(np.linspace(0, 1, 100), np.linspace(0, 1, 100) > 0.5, scenario="sparse_random")
+    result = infer_network(
+        counts,
+        estimator="weighted_sparse",
+        selection="stability",
+        n_resamples=10,
+        seed=0,
+        calibrator=cal,
+        scenario_hint="sparse_random",
+    )
+    assert result.edges.posterior_probability is not None
+    assert result.diagnostics.calibration_method == "empirical_isotonic_per_scenario"
+    assert result.diagnostics.uncertainty_interpretation == "calibrated_posterior"
