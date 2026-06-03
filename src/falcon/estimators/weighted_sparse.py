@@ -68,9 +68,14 @@ def _default_weights(Zc: np.ndarray, S_clr: np.ndarray) -> np.ndarray:
     n, p = Zc.shape
     if p == 1:
         return np.ones((p, p))
-    products = Zc[:, :, None] * Zc[:, None, :]
-    theta = ((products - S_clr[None, :, :]) ** 2).mean(axis=0)
-    weights = 1.0 / np.sqrt(np.maximum(theta, 1e-12))
+    # Avoid the (n, p, p) outer-product tensor used by the naive form;
+    # use the GEMM identity E[(Z_i Z_j)^2] = (Zc^2).T @ (Zc^2) / n. See
+    # estimators/adaptive_threshold.py for the derivation. This keeps
+    # memory at O(p^2) instead of O(n p^2).
+    z_sq = Zc * Zc
+    expected_sq_product = (z_sq.T @ z_sq) / n
+    theta = np.maximum(expected_sq_product - S_clr ** 2, 1e-12)
+    weights = 1.0 / np.sqrt(theta)
     np.fill_diagonal(weights, 1.0)
     off_mask = ~np.eye(p, dtype=bool)
     mean_off = weights[off_mask].mean()

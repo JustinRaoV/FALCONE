@@ -76,13 +76,33 @@ def training_grid() -> tuple[GridCell, ...]:
 
 
 def holdout_grid() -> tuple[GridCell, ...]:
-    """Larger cells reserved for the frozen holdout."""
+    """Larger cells reserved for the frozen holdout.
+
+    The density values are chosen so the planted edge count grows linearly
+    with ``p`` (not quadratically). At ``p=200`` this is ~100 edges; at
+    ``p=1000`` it is ~500 edges — every node has on average ~1 partner,
+    consistent with the sparsity assumption that all matched-estimand
+    estimators rely on. The training grid used a higher density (0.05) on
+    smaller cells where 0.05 still gives ~5 edges/feature.
+    """
     primary = ["sparse_random", "hub", "block"]
     sensitivity = ["heavy_tailed", "negative_binomial_zi"]
-    sizes = [(250, 200), (500, 500), (500, 1000)]
+    sizes_dense = [(250, 200)]      # 0.01 → ~200 edges
+    sizes_mid = [(500, 500)]        # 0.005 → ~625 edges
+    sizes_large = [(500, 1000)]     # 0.002 → ~1000 edges
     seeds = [10, 11, 12]
-    cells = _build(primary, sizes, density=0.03, seeds=seeds, split="holdout")
-    cells += _build(sensitivity, sizes, density=0.03, seeds=seeds, split="holdout")
+    cells: list[GridCell] = []
+    for sc in primary + sensitivity:
+        cells += _build([sc], sizes_dense, density=0.01, seeds=seeds, split="holdout")
+        cells += _build([sc], sizes_mid, density=0.005, seeds=seeds, split="holdout")
+        cells += _build([sc], sizes_large, density=0.002, seeds=seeds, split="holdout")
+    # n/p ratio sensitivity at fixed p=500
     np_ratio_sizes = [(100, 500), (250, 500), (500, 500)]
-    cells += _build(["np_ratio"], np_ratio_sizes, density=0.03, seeds=seeds, split="holdout")
+    cells += _build(
+        ["np_ratio"],
+        np_ratio_sizes,
+        density=0.005,
+        seeds=seeds,
+        split="holdout",
+    )
     return tuple(cells)

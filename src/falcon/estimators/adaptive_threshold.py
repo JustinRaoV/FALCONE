@@ -83,11 +83,17 @@ def estimate_adaptive_threshold(
     Zc = Z - Z.mean(axis=0, keepdims=True)
     sample_cov = (Zc.T @ Zc) / (n - 1)
 
-    # Per-entry variance of the sample covariance: theta_ij = (1/n) Σ_k
-    # (Z_ki Z_kj - sigma_ij)^2 with the convention that the centered
-    # product matrix ``Y_kij = Zc_ki Zc_kj`` has empirical mean ~ sigma_ij.
-    products = (Zc[:, :, None] * Zc[:, None, :])  # (n, p, p)
-    theta = ((products - sample_cov[None, :, :]) ** 2).mean(axis=0)
+    # Per-entry variance of the sample covariance:
+    #   theta_ij = (1/n) Σ_k (Z_ki Z_kj - sigma_ij)^2
+    #            = (1/n) Σ_k (Z_ki Z_kj)^2 - 2 sigma_ij * (1/n) Σ_k Z_ki Z_kj
+    #              + sigma_ij^2
+    #            ≈ E[(Z_i Z_j)^2] - sigma_ij^2
+    # where E[(Z_i Z_j)^2] = (1/n) (Zc**2).T @ (Zc**2). Computing it via a
+    # GEMM avoids the (n, p, p) outer-product tensor that would cost
+    # 8 * n * p^2 bytes (4 GB at n=500, p=1000).
+    z_sq = Zc * Zc
+    expected_sq_product = (z_sq.T @ z_sq) / n
+    theta = np.maximum(expected_sq_product - sample_cov ** 2, 0.0)
 
     lambda_matrix = threshold_constant * np.sqrt(
         np.maximum(theta, 0.0) * np.log(max(p, 2)) / n
