@@ -63,8 +63,39 @@ def _extract_secom_v1_0_0(archive: Path, out_dir: Path) -> None:
     (out_dir / "samples.csv").write_text("sample_id\n" + "\n".join(sample_names) + "\n")
 
 
+def _extract_hmp_16s(biom_path: Path, out_dir: Path) -> None:
+    """Extract HMP 16S OTU table from a BIOM file (v1.0 JSON or v2 HDF5).
+
+    The BIOM format stores observations × samples; we transpose to
+    samples × taxa for downstream consumers.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Lazy import — biom-format is in the optional 'accel' extra.
+    try:
+        from biom import load_table  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise ImportError(
+            "biom-format is required for hmp_16s extraction; "
+            "install with: uv sync --extra accel"
+        ) from exc
+    table = load_table(str(biom_path))
+    matrix = table.matrix_data
+    # biom returns scipy sparse for some inputs; densify before transpose.
+    if hasattr(matrix, "toarray"):
+        dense = matrix.toarray()
+    else:
+        dense = np.asarray(matrix)
+    counts = dense.astype(np.int64).T  # samples × taxa
+    np.savez_compressed(out_dir / "counts.npz", counts=counts)
+    taxa = [str(obs_id) for obs_id in table.ids("observation")]
+    samples = [str(s) for s in table.ids("sample")]
+    (out_dir / "taxa.csv").write_text("taxon\n" + "\n".join(taxa) + "\n")
+    (out_dir / "samples.csv").write_text("sample_id\n" + "\n".join(samples) + "\n")
+
+
 DATASET_EXTRACTORS: dict[str, Callable] = {
     "secom_v1.0.0": _extract_secom_v1_0_0,
+    "hmp_16s": _extract_hmp_16s,
 }
 
 
