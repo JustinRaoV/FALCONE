@@ -22,14 +22,49 @@ Adding extraction code for a dataset must include:
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import os
 import sys
+import zipfile
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+
+
+def _extract_secom_v1_0_0(archive: Path, out_dir: Path) -> None:
+    """Extract SECOM v1.0.0 archive (Zenodo 10.5281/zenodo.6809029).
+
+    The archive's OTU CSV is in taxon-first layout (rows = taxa, columns =
+    samples). We transpose to samples × taxa for downstream consumers.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as zf:
+        otu_members = [m for m in zf.namelist() if m.endswith("secom_otu.csv")]
+        if not otu_members:
+            raise FileNotFoundError(
+                "secom_otu.csv not found in archive; "
+                f"members: {zf.namelist()}"
+            )
+        otu_member = otu_members[0]
+        with zf.open(otu_member) as fh:
+            reader = csv.reader(line.decode("utf-8") for line in fh)
+            header = next(reader)
+            sample_names = header[1:]
+            taxa = []
+            rows = []
+            for row in reader:
+                taxa.append(row[0])
+                rows.append([int(v) for v in row[1:]])
+    counts = np.asarray(rows, dtype=np.int64).T  # samples × taxa
+    np.savez_compressed(out_dir / "counts.npz", counts=counts)
+    (out_dir / "taxa.csv").write_text("taxon\n" + "\n".join(taxa) + "\n")
+    (out_dir / "samples.csv").write_text("sample_id\n" + "\n".join(sample_names) + "\n")
+
+
 DATASET_EXTRACTORS: dict[str, Callable] = {
-    # populated when a dataset is wired in
+    "secom_v1.0.0": _extract_secom_v1_0_0,
 }
 
 
