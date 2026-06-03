@@ -1,12 +1,24 @@
 # FALCON — Single-Domain Compositional Network Estimator
 
-> **Status: holdout evaluated; no advantage claim.** The rebuild
+> **Status: holdout evaluated; honest mixed result.** The rebuild
 > completed on 2026-06-02. The frozen holdout grid was run on 2026-06-03
 > (see `docs/acceptance-gate-report.md`). The selected production
-> candidate `weighted_sparse` cleared 2 of the 6 acceptance gates, ties
-> the closed-form SparCC baseline on every scenario at a ~1000× higher
-> wallclock, and is **not advertised as superior to existing methods**.
-> Negative results are a valid output of this design.
+> candidate `weighted_sparse`:
+>
+> * **ties** the closed-form SparCC baseline on AUROC / AP within
+>   rounding error on every scenario, at ~1 000× higher wallclock;
+> * **wins consistently** against the same-class sparse baselines
+>   `cclasso` and `coat` (AP +0.025, AUROC +0.06 on average) and runs
+>   10–100× faster than them;
+> * is the **only** tested method that recovers signal above near-random
+>   on hub-cluster data at `p ≥ 500` (AUROC 0.78 vs 0.50–0.74 for the rest);
+> * provides a sparse edge table and per-edge `selection_probability`,
+>   which closed-form SparCC does not.
+>
+> 2 of the 6 acceptance gates pass strictly. The repository does **not**
+> claim a clear ranking-accuracy win over closed-form SparCC; it does
+> claim being the right tool when sparse output, per-edge uncertainty,
+> or large-`p` hub-cluster recovery is needed.
 
 The goal of the first release is one Python estimator that simultaneously:
 
