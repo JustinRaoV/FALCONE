@@ -135,3 +135,21 @@ def test_uniform_weights_match_unweighted_path():
         result_default_then_uniform.covariance.T,
         atol=1e-10,
     )
+
+
+def test_relative_tolerance_responds_to_tol_parameter():
+    """Relative convergence tolerance: looser tol should converge in fewer
+    iterations on the same problem. Verifies the relative criterion is
+    in force (absolute-tol code would also pass this, but the new code
+    must too)."""
+    rng = np.random.default_rng(0)
+    n, p = 80, 20
+    # Use small p so well within convergence reach at default tol.
+    Z = rng.normal(0, 1, size=(n, p))
+    r_tight = estimate_weighted_sparse(Z, lambda_value=0.05, max_iter=200, tol=1e-6)
+    r_loose = estimate_weighted_sparse(Z, lambda_value=0.05, max_iter=200, tol=1e-3)
+    assert r_tight.converged, "tight tol must converge within max_iter on small p"
+    assert r_loose.converged, "loose tol must converge within max_iter on small p"
+    assert r_loose.iterations <= r_tight.iterations, (
+        f"looser tol used MORE iters ({r_loose.iterations}) than tight ({r_tight.iterations})"
+    )

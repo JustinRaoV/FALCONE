@@ -138,8 +138,9 @@ def estimate_weighted_sparse(
         Sigma = 0.5 * (Sigma + Sigma.T)
 
         delta = np.linalg.norm(Sigma - Sigma_prev)
+        scale = max(np.linalg.norm(Sigma), 1e-12)
         iterations = it
-        if delta < tol:
+        if delta / scale < tol:
             converged = True
             break
 
