@@ -119,3 +119,70 @@ def test_network_result_correlation_must_be_square_when_present():
             diagnostics=diag,
             correlation=np.zeros((3, 4)),
         )
+
+
+from falcon.results import (
+    CalibrationReport,
+    VALID_CALIBRATIONS,
+    VALID_UNCERTAINTY_INTERPRETATIONS,
+)
+
+
+def test_edge_table_accepts_posterior_probability():
+    pairs = np.array([[0, 1], [0, 2]], dtype=np.int64)
+    scores = np.array([0.3, 0.4], dtype=np.float64)
+    sp = np.array([0.7, 0.85], dtype=np.float64)
+    post = np.array([0.55, 0.80], dtype=np.float64)
+    et = EdgeTable(
+        pairs=pairs, scores=scores, selection_probability=sp,
+        pvalue_approx=None, qvalue_approx=None, posterior_probability=post,
+    )
+    assert et.posterior_probability is not None
+    assert et.posterior_probability.shape == (2,)
+
+
+def test_edge_table_posterior_defaults_to_none():
+    pairs = np.array([[0, 1]], dtype=np.int64)
+    scores = np.array([0.3], dtype=np.float64)
+    et = EdgeTable(
+        pairs=pairs, scores=scores, selection_probability=None,
+        pvalue_approx=None, qvalue_approx=None,
+    )
+    assert et.posterior_probability is None
+
+
+def test_calibration_method_enum_extended_additively():
+    for legacy in ("none", "permutation_base_only", "subsampling"):
+        assert legacy in VALID_CALIBRATIONS
+    for added in (
+        "empirical_isotonic_per_scenario",
+        "empirical_isotonic_pooled",
+        "meinshausen_buhlmann_bound",
+    ):
+        assert added in VALID_CALIBRATIONS
+
+
+def test_uncertainty_interpretation_enum_extended_additively():
+    assert "selection_probability_only" in VALID_UNCERTAINTY_INTERPRETATIONS
+    assert "calibrated_posterior" in VALID_UNCERTAINTY_INTERPRETATIONS
+    assert "calibrated_posterior_pooled" in VALID_UNCERTAINTY_INTERPRETATIONS
+
+
+def test_calibration_report_dataclass_minimal():
+    rep = CalibrationReport(
+        cell_id="sparse_random_n100_p50_seed0",
+        scenario="sparse_random",
+        n=100,
+        p=50,
+        n_off_diagonal_pairs=1225,
+        ece_aggregate=0.072,
+        ece_per_scenario={"sparse_random": 0.072},
+        brier_score=0.04,
+        reliability_bin_midpoints=np.linspace(0.05, 0.95, 10),
+        reliability_observed_frequency=np.linspace(0.05, 0.95, 10),
+        reliability_bin_counts=np.full(10, 100, dtype=np.int64),
+        pi_train=0.05,
+        calibration_method="empirical_isotonic_per_scenario",
+    )
+    assert rep.ece_aggregate == pytest.approx(0.072)
+    assert rep.reliability_bin_midpoints.shape == (10,)

@@ -27,15 +27,21 @@ VALID_CALIBRATIONS = frozenset(
         "none",
         "permutation_base_only",
         "subsampling",
+        "empirical_isotonic_per_scenario",
+        "empirical_isotonic_pooled",
+        "meinshausen_buhlmann_bound",
     }
 )
 
 VALID_UNCERTAINTY_INTERPRETATIONS = frozenset(
     {
+        "no_uncertainty_reported",
         "selection_probability_only",
         "selection_probability_with_approx_fdr",
+        "permutation_base_only",
         "permutation_max_statistic",
-        "no_uncertainty_reported",
+        "calibrated_posterior",
+        "calibrated_posterior_pooled",
     }
 )
 
@@ -55,6 +61,7 @@ class EdgeTable:
     selection_probability: np.ndarray | None = None
     pvalue_approx: np.ndarray | None = None
     qvalue_approx: np.ndarray | None = None
+    posterior_probability: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if self.pairs.ndim != 2 or self.pairs.shape[1] != 2:
@@ -62,7 +69,12 @@ class EdgeTable:
         n = self.pairs.shape[0]
         if self.scores.shape != (n,):
             raise ValueError("EdgeTable.scores length must match pairs length")
-        for name in ("selection_probability", "pvalue_approx", "qvalue_approx"):
+        for name in (
+            "selection_probability",
+            "pvalue_approx",
+            "qvalue_approx",
+            "posterior_probability",
+        ):
             arr = getattr(self, name)
             if arr is not None and arr.shape != (n,):
                 raise ValueError(f"EdgeTable.{name} length must match pairs length")
@@ -112,3 +124,46 @@ class NetworkResult:
         if self.correlation is not None:
             if self.correlation.ndim != 2 or self.correlation.shape[0] != self.correlation.shape[1]:
                 raise ValueError("NetworkResult.correlation must be square when present")
+
+
+@dataclass(frozen=True)
+class CalibrationReport:
+    """Per-cell or aggregate calibration evidence emitted by the
+    Line B isotonic procedure. Lives alongside EdgeTable, never inside
+    it (the cell-level report includes off-diagonal pairs not in the
+    selected EdgeTable)."""
+
+    cell_id: str
+    scenario: str
+    n: int
+    p: int
+    n_off_diagonal_pairs: int
+    ece_aggregate: float
+    ece_per_scenario: dict[str, float]
+    brier_score: float
+    reliability_bin_midpoints: np.ndarray
+    reliability_observed_frequency: np.ndarray
+    reliability_bin_counts: np.ndarray
+    pi_train: float
+    calibration_method: str
+
+    def __post_init__(self) -> None:
+        if self.calibration_method not in VALID_CALIBRATIONS:
+            raise ValueError(
+                f"invalid calibration_method {self.calibration_method!r}; "
+                f"valid: {sorted(VALID_CALIBRATIONS)}"
+            )
+        for name in (
+            "reliability_bin_midpoints",
+            "reliability_observed_frequency",
+            "reliability_bin_counts",
+        ):
+            arr = getattr(self, name)
+            if arr.ndim != 1:
+                raise ValueError(f"{name} must be 1-D, got shape {arr.shape}")
+        if not (
+            self.reliability_bin_midpoints.shape
+            == self.reliability_observed_frequency.shape
+            == self.reliability_bin_counts.shape
+        ):
+            raise ValueError("reliability arrays must share shape")
