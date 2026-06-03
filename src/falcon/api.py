@@ -183,6 +183,8 @@ def infer_network(
     min_prevalence: float = 0.0,
     min_total: float = 1.0,
     seed: int = 0,
+    calibrator=None,
+    scenario_hint: str | None = None,
 ) -> NetworkResult:
     """Infer a single-domain compositional network.
 
@@ -254,14 +256,44 @@ def infer_network(
 
     edges = _build_edge_table(full.correlation, full.covariance, sel_prob)
 
+    # Line B: apply calibrator to populate posterior_probability on the
+    # selected edges. Defaults preserve None when no calibrator passed.
+    calibration_method = "none"
+    uncertainty_interpretation = uncertainty
+
+    if calibrator is not None and sel_prob is not None and len(edges.pairs) > 0:
+        # Local import to avoid circular import via results.py.
+        from falcon.calibration import IsotonicCalibrator  # noqa: F401
+
+        scenario_key = scenario_hint if scenario_hint is not None else "*"
+        triu_i = edges.pairs[:, 0]
+        triu_j = edges.pairs[:, 1]
+        sel_for_edges = sel_prob[triu_i, triu_j]
+        posterior_probability = calibrator.predict(sel_for_edges, scenario=scenario_key)
+        if calibrator.mode == "pooled":
+            calibration_method = "empirical_isotonic_pooled"
+            uncertainty_interpretation = "calibrated_posterior_pooled"
+        else:
+            calibration_method = "empirical_isotonic_per_scenario"
+            uncertainty_interpretation = "calibrated_posterior"
+        # Replace edges with a copy that carries posterior_probability.
+        edges = EdgeTable(
+            pairs=edges.pairs,
+            scores=edges.scores,
+            selection_probability=edges.selection_probability,
+            pvalue_approx=edges.pvalue_approx,
+            qvalue_approx=edges.qvalue_approx,
+            posterior_probability=posterior_probability,
+        )
+
     diagnostics = EstimatorDiagnostics(
         estimator=estimator,
         lambda_value=float(full.lambda_value),
         converged=bool(full.converged),
         iterations=int(full.iterations),
         min_eigenvalue=float(full.min_eigenvalue),
-        calibration_method="none",
-        uncertainty_interpretation=uncertainty,
+        calibration_method=calibration_method,
+        uncertainty_interpretation=uncertainty_interpretation,
         preprocess_report=prepared.report,
         notes=full.notes,
     )

@@ -24,8 +24,15 @@ def test_manifest_tsv_present_and_has_required_columns():
         }
         rows = list(reader)
     assert len(rows) >= 4
-    # Every row points at a path that exists.
+    # Every row whose content is committed (docs / pointer / measurement)
+    # points at a path that exists. Rows tagged "source-data" describe
+    # generated benchmark artifacts that are gitignored and only produced
+    # when their generator runs — those need only declare the future
+    # location and generator command.
+    persistent_roles = {"docs", "pointer", "measurement"}
     for row in rows:
+        if row["role"] not in persistent_roles:
+            continue
         target = REPO / row["path"]
         assert target.exists(), f"manifest row {row['path']} missing"
 
