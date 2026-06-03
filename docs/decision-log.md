@@ -277,3 +277,20 @@ as a documented fast-ranking alternative.
   switch to soft mode by default) for a future release. Out of scope
   for this release because the production estimator is already chosen
   and retuning would invalidate the holdout statistical guarantee.
+
+## 2026-06-03 — Branching strategy for method-optimization push
+
+**Decision.** Three feature branches (`feat/line-a-speed`,
+`feat/line-b-calibration`, `feat/line-d-realdata`) created from `main`.
+Sequential branch-switching, not `git worktree`. Line B merges first
+at the end of week 2; Lines A and D rebase onto main after that.
+
+**Why.** Execution model is subagent-driven within a single coordinator
+session, which dispatches one implementation subagent at a time
+(no parallel writes). Branch-switching is sufficient and avoids
+worktree management overhead.
+
+**How to apply.** `git checkout feat/<branch>` at the start of each
+Part. Differential-test harness lives on `main` (shared infrastructure)
+and is inherited by each feature branch via the initial `git branch`
+fork point.
