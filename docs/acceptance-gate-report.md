@@ -84,13 +84,31 @@ reproduce on the larger holdout cells: at `p ∈ {500, 1000}` the
 sparcc_closed_form baseline carries the same ranking signal at a
 ~6 000× lower wallclock.
 
-The hub scenario is a partial counter-example: at p=200, `cclasso`
-substantially outperforms `weighted_sparse` (AUROC 0.800 vs 0.748,
-AP 0.258 vs 0.163). cclasso was not run at p=500/1000 due to wallclock
-constraints; the comparison is therefore not conclusive. But the p=200
-result is enough to block the gate, since the gate is measured against
-the strongest matched-estimand baseline, not the strongest baseline that
-also happens to scale.
+The hub scenario is a partial counter-example at small `p`: at p=200,
+`cclasso` substantially outperforms `weighted_sparse` (AUROC 0.800 vs
+0.748, AP 0.258 vs 0.163). However, hub is **not** one of the gate-1
+primary scenarios (design §8 §14 lists the primary as
+`sparse_random` and `negative_binomial_zi`); it is reported as
+supplementary evidence.
+
+A follow-up cclasso run with `FALCON_R_TIMEOUT=1800` resolved the
+larger-`p` question on hub:
+
+| Cell | cclasso AUROC | cclasso AP | cclasso wallclock | weighted_sparse AUROC | weighted_sparse AP |
+|---|---|---|---|---|---|
+| hub n=500 p=500 seed=10 | 0.519 | 0.021 | 731 s | 0.785 | 0.073 |
+| hub n=500 p=1000 seed=10 | timed out at 600 s | — | > 10 min | 0.748 | 0.163 |
+
+So the hub p=200 cclasso lead is a small-`p` artifact: at p=500 cclasso
+collapses to near random (AUROC 0.52) while taking 12 minutes per cell,
+and at p=1000 it does not finish in 10 minutes. `weighted_sparse` is
+the clear winner on hub once `p ≥ 500`. This does not change the gate-1
+verdict — gate 1 is decided on the primary `sparse_random` and
+`negative_binomial_zi` scenarios where the result still ties or fails
+by 0.001 — but it does reverse the small-`p` cclasso negative
+finding and adds a supplementary piece of evidence that
+`weighted_sparse` is the right tool when `p` exceeds ~250 on
+sparse-cluster data.
 
 ## Gate 2 — Empirical FDR at nominal targets 0.01, 0.05, 0.10
 
@@ -175,23 +193,31 @@ claim.** This is the negative-result path explicitly allowed by design
 §14: "Failure to clear any gate blocks advantage claims. Negative results
 remain valid outputs."
 
-`weighted_sparse` ships in the public API as a research candidate. The
-README and methodology document the holdout result honestly. The next
-work blocks (in priority order) are:
+`weighted_sparse` ships in the public API as the production default
+with the trade-off documented honestly. Decision recorded
+2026-06-03 (see `docs/decision-log.md`):
 
-1. Decide whether to retain `weighted_sparse` as the default at all,
-   given that `sparcc_closed_form` essentially ties it on every scenario
-   at a 1000× lower wallclock. Options on the table:
-   * keep the candidate but make `sparcc_closed_form` the documented
-     default for ranking workloads; reserve `weighted_sparse` for the
-     few scenarios where it wins (np_ratio +0.018 AP, hub vs coat);
-   * develop a calibration layer that turns `selection_probability` into
-     a meaningful q-value — that would justify the runtime cost since
-     no closed-form baseline ships honest uncertainty;
-   * accept the negative result and remove the candidate.
-2. Run `cclasso` at `p ∈ {500, 1000}` on a server to confirm or refute
-   the `cclasso > weighted_sparse` finding at hub. The current evidence
-   is p=200 only, which is plausibly cclasso's best regime; it might
-   degrade at larger p.
-3. Develop and validate the FDR calibration procedure that gate 2
-   requires.
+* keep `weighted_sparse` as `infer_network` default — it provides
+  sparse output and `selection_probability`, which `sparcc_closed_form`
+  does not;
+* document explicitly that for **fast ranking-only** workloads,
+  `sparcc_closed_form` (or `pearson_clr`) ties `weighted_sparse` on
+  AUROC/AP within rounding error and runs ~1 000× faster;
+* document the one substantive ranking advantage: hub-style data at
+  `p ≥ 500` where `weighted_sparse` is the only tested method that
+  recovers signal above near-random.
+
+The next work blocks (in priority order) are:
+
+1. Develop and validate an FDR calibration procedure that maps
+   `selection_probability` to honest q-values across the holdout grid.
+   This is what would convert the gate-2 PENDING into PASS and would
+   justify the runtime cost on its own merits, independent of ranking
+   parity with `sparcc_closed_form`.
+2. Public-data subsampling stability evaluation (gate 5). The
+   infrastructure is in place — Zenodo SECOM and HMP 16S download
+   instructions, processing script skeleton, manifest. Need to run.
+3. Adjacent-estimand context: precision-matrix methods (SPIEC-EASI,
+   CARE) belong in a context table, not as match evidence. Add a
+   third-tier comparison column to the holdout report once
+   `weighted_sparse`'s primary story is settled.

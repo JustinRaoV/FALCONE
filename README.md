@@ -91,6 +91,23 @@ The benchmark records `zero_policy` per row so the choice is never silent.
 See `docs/decision-log.md` for the training-grid evidence behind these
 defaults.
 
+### When to use which estimator
+
+Honest guidance after the 2026-06-03 holdout (see
+[`docs/acceptance-gate-report.md`](docs/acceptance-gate-report.md)):
+
+| You want… | Use |
+|---|---|
+| Sparse edge table + per-edge `selection_probability` | `infer_network(estimator="weighted_sparse", selection="stability")` (default) |
+| Fast dense ranking only — no sparsity, no uncertainty | `benchmarks.baselines.sparcc_closed_form(counts)` (~1 000× faster than the default; ties it on AUROC/AP within rounding error on every holdout scenario except hub at `p ≥ 500`) |
+| Hub-cluster data at `p ≥ 500` | `infer_network(estimator="weighted_sparse")` — the only tested method that recovers signal above near-random in this regime |
+| Numerically PD covariance (e.g. for log-likelihoods) | `infer_network(estimator="pd_sparse")` — same edge ranking as `adaptive_threshold` plus a diagonal-loading PD floor |
+| High zero-fraction data (zf > 0.20) | Re-run with `zero_policy="complete_case"` — training showed +0.15 AUROC vs `multiplicative` on `negative_binomial_zi` |
+
+The repository does **not** claim `weighted_sparse` outperforms
+`sparcc_closed_form` on accuracy. It provides outputs SparCC's closed
+form does not (sparse table + uncertainty), at a meaningful runtime cost.
+
 ---
 
 ## Benchmark

@@ -213,18 +213,67 @@ honestly: `weighted_sparse` is the production default, the other two
 are auxiliary modes with documented use cases. The acceptance-gate
 report names `weighted_sparse` as the candidate under evaluation.
 
+## 2026-06-03 — Holdout: 2 / 6 gates pass; keep `weighted_sparse` as default with documented trade-off
+
+**Decision.** Keep `weighted_sparse` as the `infer_network` default.
+Document explicitly that for ranking-only workloads at `p ≥ 200`
+without a sparsity or uncertainty requirement, `sparcc_closed_form`
+ties it on accuracy at ~1 000× lower wallclock. The repository does
+not publish an advantage claim against `sparcc_closed_form`.
+
+**Why.** Holdout (54 cells × 7 methods + 15 cclasso p=200 cells +
+focused cclasso p=500/1000 spot tests; see
+`docs/acceptance-gate-report.md` and `data/bench_holdout_local.csv`):
+
+* Gate 1 fail. `weighted_sparse` ties `sparcc_closed_form` on
+  `sparse_random` and is fractionally below on `negative_binomial_zi`.
+* Gate 3 fail. `weighted_sparse` is 2 600–6 000× slower than
+  `sparcc_closed_form` and uses 3.4× more memory at `p ∈ {500, 1000}`.
+* Gate 4 pass. 51 / 54 cells converged; the 3 non-converged returned
+  `converged=False` with iteration counts.
+* Gates 2 (FDR calibration) and 5 (public-data subsampling) pending.
+* Gate 6 pass.
+
+The two gates that fail mean the design's "first release succeeds only
+if one Python estimator simultaneously [...]" condition is not met.
+Per design §14 "Failure to clear any gate blocks advantage claims;
+negative results remain valid outputs". The repository reports the
+negative result honestly.
+
+`weighted_sparse` is retained as the default not because it ranks
+better, but because it provides two capabilities that
+`sparcc_closed_form` does not: a sparse output table and an honest
+`selection_probability` from stability subsampling. Users who want
+fast ranking only can either use `sparcc_closed_form` directly through
+`benchmarks.baselines.sparcc_closed_form` or threshold the dense
+correlation matrix returned by `weighted_sparse`'s `correlation` field.
+
+**One substantive supplementary win.** Hub-style data at `p ≥ 500`:
+`weighted_sparse` is the only tested method that recovers signal
+above near random (AUROC ~0.78, AP ~0.07). `sparcc_closed_form` and
+`pearson_clr` reach AUROC ~0.76 / AP ~0.06; `cclasso` collapses to
+AUROC 0.519 (12-minute wallclock) at hub p=500 and times out at
+p=1000; `coat` reaches AUROC 0.51 at p=500. This regime is where the
+sparse covariance approach earns its keep, but the design's gate-1
+primary scenarios (`sparse_random`, `negative_binomial_zi`) do not
+weight hub strongly enough for it to flip the gate.
+
+**How to apply.** README and methodology now describe the trade-off
+explicitly under "When to use which estimator". The
+`infer_network` docstring records the holdout verdict so any consumer
+who reads the API surface sees the negative result. The
+`benchmarks/baselines.py::sparcc_closed_form` baseline is now exposed
+as a documented fast-ranking alternative.
+
 ## Open questions
 
-* Whether `weighted_sparse` clears acceptance gate 3 (runtime / peak
-  memory improvement vs the strongest accurate baseline) at the
-  holdout cell sizes (`p ∈ {200, 500, 1000}`). Training data shows
-  ~750× slower than SparCC at `p=100`; this must reverse as `p` grows
-  or the gate fails.
-* Whether the small AUROC delta vs SparCC (~0.002) survives the
-  holdout's larger cells.
-* Approximate q-values. Exposed only if observed simulation FDR is
-  defensible across holdout scenarios; otherwise these stay `None`.
-* Whether to retune `adaptive_threshold` for a future release. Possible
-  improvements: lower `threshold_constant`, switch to soft mode by
-  default. Out of scope for this release because the production
-  estimator is already chosen.
+* Approximate q-values via stability-selection calibration. Gate 2
+  remains pending. A working calibration layer is the cheapest path
+  to a defensible "uncertainty" win that does not depend on outranking
+  `sparcc_closed_form` on accuracy.
+* Public-data subsampling stability evaluation (gate 5). Infrastructure
+  is in place; needs Zenodo SECOM or HMP 16S downloaded and processed.
+* Whether to retune `adaptive_threshold` (lower `threshold_constant`,
+  switch to soft mode by default) for a future release. Out of scope
+  for this release because the production estimator is already chosen
+  and retuning would invalidate the holdout statistical guarantee.

@@ -186,14 +186,27 @@ def infer_network(
 ) -> NetworkResult:
     """Infer a single-domain compositional network.
 
-    Defaults frozen on the 2026-06-03 training grid (see
-    ``docs/decision-log.md``):
+    Defaults frozen on the 2026-06-03 training grid and validated on the
+    2026-06-03 holdout (see ``docs/acceptance-gate-report.md``):
 
-    * ``estimator="weighted_sparse"`` — top of every training scenario.
+    * ``estimator="weighted_sparse"`` — provides a sparse edge table
+      plus stability-based ``selection_probability``. Ranks at or near
+      ``sparcc_closed_form`` on every holdout scenario; clearly wins on
+      hub-cluster data at ``p >= 500`` where every other tested method
+      collapses to near-random AUROC.
     * ``zero_policy="multiplicative"`` — best when zero fraction <= 0.15;
       re-run with ``zero_policy="complete_case"`` when zero fraction > 0.20.
     * ``selection="stability"`` with ``n_resamples=100`` — primary
       uncertainty output is ``selection_probability``.
+
+    Honest trade-off recorded in the README "When to use which estimator"
+    table: the default is ~1000x slower than ``sparcc_closed_form``
+    (available via ``benchmarks.baselines``) and ties it on
+    AUROC / AP within rounding error on most scenarios. Use this default
+    when you need sparse output or per-edge uncertainty; use
+    ``sparcc_closed_form`` for fast dense ranking. The repository does
+    not claim ``weighted_sparse`` outperforms ``sparcc_closed_form`` on
+    accuracy.
 
     See ``docs/superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md``
     section 5 for the schema and section 6 for the data flow.

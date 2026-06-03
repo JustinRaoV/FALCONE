@@ -130,12 +130,14 @@ def _run_r(rscript: str, script_body: str, counts: np.ndarray) -> tuple[bool, st
         script_path = os.path.join(tmp, "run.R")
         with open(script_path, "w") as fh:
             fh.write(script)
+        # Override via FALCON_R_TIMEOUT (seconds); default 600s = 10 min.
+        timeout_s = float(os.environ.get("FALCON_R_TIMEOUT", "600"))
         try:
             proc = subprocess.run(
                 [rscript, "--no-save", script_path],
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=timeout_s,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
             return False, f"Rscript failed: {exc!r}", None
