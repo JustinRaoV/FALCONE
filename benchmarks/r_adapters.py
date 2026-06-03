@@ -87,7 +87,12 @@ def _resolve_script(method: str) -> Path | None:
 # summing to ~1, n x p) and writes ``corr`` (a p x p correlation matrix).
 _RUNNERS = {
     "cclasso": (
-        "fit <- cclasso(x, counts=FALSE, n_boot=20, k_cv=3)\n"
+        # Reduced n_boot from default 20 -> 5 to keep wallclock viable on
+        # holdout cells (p=1000 with n_boot=20 took ~5 min/cell). The
+        # bootstrap only refines p-values; the cor_w estimate from one
+        # CV-selected lambda is the same. We use this estimate for
+        # ranking only, so the saving is safe for our acceptance gates.
+        "fit <- cclasso(x, counts=FALSE, n_boot=5, k_cv=3)\n"
         "corr <- fit$cor_w\n",
         "latent_log_abundance_correlation",
     ),

@@ -1,10 +1,12 @@
 # FALCON — Single-Domain Compositional Network Estimator
 
-> **Status: rebuild in progress.** This repository was reset on 2026-06-02 to
-> drop unvalidated screen-refine claims and rebuild around a statistically
-> defensible single-domain estimator. The Python package compiles, the new
-> public API is wired end-to-end, and tests are green — but **no acceptance
-> gate has been evaluated yet**. See [`Acceptance Gates`](#acceptance-gates).
+> **Status: holdout evaluated; no advantage claim.** The rebuild
+> completed on 2026-06-02. The frozen holdout grid was run on 2026-06-03
+> (see `docs/acceptance-gate-report.md`). The selected production
+> candidate `weighted_sparse` cleared 2 of the 6 acceptance gates, ties
+> the closed-form SparCC baseline on every scenario at a ~1000× higher
+> wallclock, and is **not advertised as superior to existing methods**.
+> Negative results are a valid output of this design.
 
 The goal of the first release is one Python estimator that simultaneously:
 
@@ -151,18 +153,22 @@ recipes.
 
 ## Acceptance gates
 
-The selected estimator must clear all six gates on frozen holdout cells
-before the repository asserts an advantage. Until then this section
-honestly reports `not yet evaluated`.
+Evaluated 2026-06-03 against `data/bench_holdout_local.csv`. See
+[`docs/acceptance-gate-report.md`](docs/acceptance-gate-report.md) for
+the full evidence.
 
 | # | Gate | Status |
 |---|---|---|
-| 1 | AUROC and Recall@K each exceed the strongest matched-estimand baseline on sparse and zero-inflated scenarios | not yet evaluated |
-| 2 | Empirical FDR reported at nominal targets `0.01`, `0.05`, `0.10`; q-values exposed only if calibration is defensible across holdout scenarios | not yet evaluated |
-| 3 | Medium- and high-dimensional runtime and peak memory each improve against the strongest accurate baseline | not yet evaluated (training shows weighted_sparse is ~27× faster than `cclasso` and ~750× slower than `sparcc_closed_form` at `p ≤ 100`; holdout must confirm the gap on larger `p`) |
-| 4 | All selected-estimator runs converge or return an explicit non-convergence diagnostic | code path supported; full grid not yet run |
-| 5 | Public real-data subsampling produces a stability report with dataset identifier, seed, resample count, and selection threshold | scripts scaffolded; report not yet produced |
-| 6 | Every numerical claim maps to a committed source-data row and generator command | infrastructure in place (`data/manifest.tsv`); no claims yet |
+| 1 | AUROC and Recall@K each exceed the strongest matched-estimand baseline on sparse and zero-inflated scenarios | **FAIL** — `weighted_sparse` ties `sparcc_closed_form` on `sparse_random` (AUROC 1.000) and is fractionally below on `negative_binomial_zi` (0.784 vs 0.785). On the `hub` scenario `cclasso` outperforms it at p=200 (AUROC 0.800 vs 0.748, AP 0.258 vs 0.163). |
+| 2 | Empirical FDR reported at nominal targets `0.01`, `0.05`, `0.10` | **PENDING** — calibration procedure not yet shipped. |
+| 3 | Medium- and high-dimensional runtime and peak memory each improve against the strongest accurate baseline | **FAIL** — `weighted_sparse` is 2 600–6 000× slower than `sparcc_closed_form` and uses 3.4× more peak memory at p=500/1000. It does win runtime against `cclasso` and `coat`, but those are not the strongest accurate baselines. |
+| 4 | All selected-estimator runs converge or return an explicit non-convergence diagnostic | **PASS** — `weighted_sparse` converged on 51 / 54 holdout cells; the remaining 3 returned `converged=False` with the iteration count. |
+| 5 | Public real-data subsampling produces a stability report with dataset identifier, seed, resample count, and selection threshold | **NOT EVALUATED** — public-data downloads deferred. |
+| 6 | Every numerical claim maps to a committed source-data row and generator command | **PASS** — every number in `acceptance-gate-report.md` traces to a row in `data/bench_holdout_local.csv` produced by the recorded generator command. |
+
+**Outcome: 2 / 6 gates pass. The repository does not publish an
+advantage claim.** This is the explicitly allowed negative-result path
+in design §14.
 
 ---
 
