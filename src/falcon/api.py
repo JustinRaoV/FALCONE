@@ -88,7 +88,8 @@ def _build_estimator(
             n, p = Z.shape
             lam = lambda_value if lambda_value is not None else _adaptive_lambda(n, p)
             r = estimate_weighted_sparse(Z, lambda_value=lam, support_only=True)
-            return r.covariance
+            triu_i, triu_j = np.triu_indices(p, k=1)
+            return r.covariance[triu_i, triu_j] != 0
     elif estimator == "adaptive_threshold":
         def estimate_fn(Z: np.ndarray) -> _EstResult:
             r = estimate_adaptive_threshold(

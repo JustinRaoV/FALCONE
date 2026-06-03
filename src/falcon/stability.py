@@ -35,8 +35,32 @@ class StabilityResult:
 
 
 def _one_subsample(Z, idx, estimator_fn, p):
+    """Run estimator_fn on a subsample and return a (p, p) int matrix
+    of {0, 1} support indicators (zero diagonal).
+
+    estimator_fn may return either:
+    - a (p, p) covariance matrix (the legacy interface), or
+    - a (p*(p-1)/2,) boolean upper-triangle support mask (faster).
+
+    The upper-triangle order matches np.triu_indices(p, k=1).
+    """
     sub = Z[idx]
-    cov = np.asarray(estimator_fn(sub), dtype=np.float64)
+    out = np.asarray(estimator_fn(sub))
+    if out.ndim == 1:
+        # Boolean upper-triangle mask. Expand to full (p, p) int matrix.
+        expected = p * (p - 1) // 2
+        if out.size != expected:
+            raise ValueError(
+                f"1-D support mask has length {out.size}, expected {expected} "
+                f"for p={p}"
+            )
+        triu_i, triu_j = np.triu_indices(p, k=1)
+        nonzero = np.zeros((p, p), dtype=np.int64)
+        nonzero[triu_i, triu_j] = out.astype(np.int64)
+        nonzero[triu_j, triu_i] = nonzero[triu_i, triu_j]
+        return nonzero
+    # 2-D covariance path: keep behaviour identical to A3.
+    cov = out.astype(np.float64, copy=False)
     if cov.ndim != 2 or cov.shape[0] != cov.shape[1] or cov.shape[0] != p:
         raise ValueError(
             "estimator_fn must return a square matrix matching Z's feature count"

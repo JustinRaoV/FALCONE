@@ -157,6 +157,32 @@ def test_seedsequence_per_subsample_streams_are_used():
     )
 
 
+def test_one_subsample_accepts_boolean_upper_triangle_mask():
+    """select_by_stability's helper must accept a 1-D bool mask as well
+    as the legacy 2-D covariance return."""
+    import numpy as np
+    from falcon.stability import select_by_stability
+
+    rng = np.random.default_rng(0)
+    Z = rng.normal(0, 1, size=(40, 6))
+    p = Z.shape[1]
+    n_triu = p * (p - 1) // 2
+
+    def mask_only(sub):
+        # Return a fixed mask: edges (0,1) and (2,3) selected.
+        triu_i, triu_j = np.triu_indices(p, k=1)
+        out = np.zeros(n_triu, dtype=bool)
+        for k, (i, j) in enumerate(zip(triu_i, triu_j)):
+            if (i, j) in ((0, 1), (2, 3)):
+                out[k] = True
+        return out
+
+    r = select_by_stability(Z, mask_only, n_resamples=10, seed=0, n_jobs=1)
+    assert r.selection_probability[0, 1] == 1.0
+    assert r.selection_probability[2, 3] == 1.0
+    assert r.selection_probability[0, 5] == 0.0
+
+
 def test_n_jobs_parallel_matches_serial_under_same_seed():
     """Determinism across n_jobs is the contract: with the same seed and
     SeedSequence.spawn(), serial (n_jobs=1) and parallel (n_jobs=4) must
