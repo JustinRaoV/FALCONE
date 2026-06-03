@@ -1,0 +1,31 @@
+{
+  "wallclock_total_s": 87.29487858299399,
+  "n_resamples": 100,
+  "cell": {
+    "scenario": "sparse_random",
+    "n": 500,
+    "p": 1000,
+    "seed": 200,
+    "density": 0.002,
+    "edge_strength": 0.6,
+    "depth": 5000
+  },
+  "edges_selected": 435820,
+  "converged": true,
+  "iterations": 70,
+  "hot_function_cumulative_seconds": {
+    "eigvalsh (np.linalg.eigvalsh and friends)": 0.074,
+    "eigh (eigendecomposition (LAPACK syevd/syevr/syevr))": 85.623,
+    "estimate_weighted_sparse (weighted_sparse alternating loop entry)": 85.623,
+    "_default_weights (GEMM-based theta_ij estimate)": 0.587,
+    "select_by_stability (stability selection driver)": 85.73
+  },
+  "hot_function_percent_wallclock": {
+    "eigvalsh (np.linalg.eigvalsh and friends)": 0.08477015055315745,
+    "eigh (eigendecomposition (LAPACK syevd/syevr/syevr))": 98.0847919028784,
+    "estimate_weighted_sparse (weighted_sparse alternating loop entry)": 98.0847919028784,
+    "_default_weights (GEMM-based theta_ij estimate)": 0.6724334915500462,
+    "select_by_stability (stability selection driver)": 98.20736495840795
+  },
+  "notes": ""
+}
