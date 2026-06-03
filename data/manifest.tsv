@@ -1,0 +1,5 @@
+path	role	provenance	generator	licence
+data/README.md	docs	hand-written	-	repository licence (MIT)
+data/manifest.tsv	docs	hand-written	-	repository licence (MIT)
+data/public/secom_v1.0.0.md	pointer	hand-written; references Zenodo 10.5281/zenodo.6809029	-	CC-BY-4.0 (Zenodo archive); pointer file MIT
+data/public/hmp_16s.md	pointer	hand-written; references NIH BioProject PRJNA43021 / PRJNA48489	-	NIH public domain (HMP); pointer file MIT

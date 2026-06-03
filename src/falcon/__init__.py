@@ -1,31 +1,38 @@
-"""Falcon-SR: latent log-abundance correlation networks for compositional data.
+"""FALCON: single-domain compositional network estimator.
 
 Public API:
 
-    infer_single(counts, *, mode="fast", ...)
-    infer_cross(counts_x, counts_y, *, mode="fast", prior=None, ...)
-    PriorEdge(source_feature, target_feature, expected_sign, confidence,
-              provenance="")
+    infer_network(
+        counts,
+        *,
+        estimator="weighted_sparse",
+        zero_policy="multiplicative",
+        selection="stability",
+        n_resamples=100,
+        seed=0,
+    ) -> NetworkResult
 
-Falcon-SR estimates the latent log-abundance Pearson correlations targeted by
-SparCC (single-domain) and SparXCC Case-C (cross-domain), but reaches the same
-estimand through a screen-refine pipeline: a SparCC-compatible dense base score,
-a top-k candidate union, and a sparse refinement that updates only
-candidate-incident equations. Optional permutation calibration produces
-approximate p-values; optional signed biological priors enter as candidate
-injections plus a post-hoc analytic shrinkage.
+Three Python-only estimator candidates share the entrypoint:
 
-See ``docs/superpowers/specs/2026-06-01-falcon-sr-design.md`` for the
-algorithmic specification and ``docs/superpowers/specs/2026-06-02-falcon-sr-rewrite-execution-design.md``
-for the execution / migration details.
+    * ``adaptive_threshold`` — composition-adjusted thresholding (COAT-style)
+    * ``weighted_sparse`` — weighted soft-thresholded covariance (fastCCLasso-style)
+    * ``pd_sparse`` — adaptive threshold + positive-definite diagonal-loading
+
+The selected estimator must clear the acceptance gates listed in
+``docs/superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md``
+section 14 before any production claim is made. Until those gates are
+evaluated on a frozen holdout grid, this package does not assert that any
+estimator outperforms the matched-estimand baselines.
 """
+
+from __future__ import annotations
 
 import warnings as _warnings
 
 # macOS Accelerate + NumPy 2.x emits spurious "matmul" RuntimeWarnings on
-# valid finite inputs. Silence the false positive at import time so users
+# valid finite inputs. Filter the false positive at import time so users
 # see real numerical warnings instead of platform noise. Real numerical
-# issues remain visible through explicit isfinite assertions in the code.
+# issues are caught by explicit isfinite assertions in the code.
 for _msg in (
     "divide by zero encountered in matmul",
     "overflow encountered in matmul",
@@ -33,8 +40,7 @@ for _msg in (
 ):
     _warnings.filterwarnings("ignore", message=_msg, category=RuntimeWarning)
 
-from falcon.cross import infer_cross
-from falcon.prior import PriorEdge
-from falcon.single import infer_single
+from falcon.api import infer_network
+from falcon.results import EdgeTable, EstimatorDiagnostics, NetworkResult
 
-__all__ = ["infer_single", "infer_cross", "PriorEdge"]
+__all__ = ["infer_network", "EdgeTable", "EstimatorDiagnostics", "NetworkResult"]

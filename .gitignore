@@ -19,35 +19,23 @@ env/
 *.swp
 *.swo
 
-# LaTeX build artifacts (PDFs are kept; intermediate files are not)
-*.aux
-*.bbl
-*.blg
-*.fdb_latexmk
-*.fls
-*.log
-*.out
-*.synctex.gz
-*.toc
-*.lof
-*.lot
-
-# Project-specific
-.worktrees/
-benchmarks/__pycache__/
-manuscript/figures/__pycache__/
-src/falcon/__pycache__/
-
-# Anything generated to /tmp is not part of the repo
-
-# Local git worktrees used for isolated feature development
+# Local git worktrees used for isolated feature development.
+# Historical recovery points; preserved on the operator's machine but
+# never committed.
 .worktrees/
 
 # Local reference papers (copyrighted journal PDFs, do not redistribute)
 ref/
 
-# Figure raster/vector previews (regenerable from manuscript/figures/*.py).
-# The .pdf versions are kept because the LaTeX main.tex includes them.
-manuscript/figures/*.png
-manuscript/figures/*.svg
-manuscript/figures/*.tiff
+# Generated benchmark output. The benchmark CSVs are NOT committed; they
+# are regenerated from `benchmarks/run_benchmark.py` and described in
+# `data/manifest.tsv`. Tracked source-data tables (when added) live under
+# `data/` with explicit manifest rows.
+data/bench_*.csv
+data/*_local.csv
+
+# Public-data downloads. Raw third-party archives are never committed
+# (see `data/public/*.md`). Only the pointer markdown files belong in the
+# tree.
+data/public/**/*
+!data/public/*.md

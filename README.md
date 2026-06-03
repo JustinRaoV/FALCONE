@@ -1,22 +1,24 @@
-# Falcon-SR
+# FALCON — Single-Domain Compositional Network Estimator
 
-**Falcon-SR** is a screen-refine algorithm for inferring latent log-abundance
-Pearson correlations from compositional sequencing data. It targets the same
-estimand as SparCC (single-domain) and SparXCC Case-C (cross-domain) but
-reaches it through a sparse pipeline: a SparCC-compatible dense base score, a
-top-k candidate union, and a sparse refinement that updates only candidate-
-incident equations. Optional permutation calibration produces approximate
-p-values; optional signed biological priors enter as a candidate injection
-plus an analytic post-hoc shrinkage.
+> **Status: rebuild in progress.** This repository was reset on 2026-06-02 to
+> drop unvalidated screen-refine claims and rebuild around a statistically
+> defensible single-domain estimator. The Python package compiles, the new
+> public API is wired end-to-end, and tests are green — but **no acceptance
+> gate has been evaluated yet**. See [`Acceptance Gates`](#acceptance-gates).
 
-This repository implements Falcon-SR end-to-end (`src/falcon/`), reproduces it
-against external baselines (`benchmarks/`), and documents the design
-(`docs/superpowers/specs/`).
+The goal of the first release is one Python estimator that simultaneously:
 
-> Status: experimental. The single- and cross-domain APIs are implemented
-> and feasibility-tested; the published acceptance gates in the design
-> specification must be satisfied by a full benchmark run before the
-> method is presented as validated.
+1. improves edge recovery against the strongest matched-estimand baseline;
+2. provides an honest uncertainty output with validated interpretation;
+3. improves runtime and peak memory on medium- and high-dimensional grids;
+4. remains stable under subsampling on public microbiome data; and
+5. can be reproduced from committed benchmark code and source-data tables.
+
+If no estimator clears every gate, this repository is required to publish the
+negative result plainly. It will not publish an advantage claim.
+
+The full design is in
+[`docs/superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md`](docs/superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md).
 
 ---
 
@@ -29,89 +31,114 @@ uv run pytest -q
 
 ```python
 import numpy as np
-from falcon import infer_single, infer_cross, PriorEdge
+from falcon import infer_network
 
 rng = np.random.default_rng(0)
+counts = rng.integers(1, 200, size=(200, 50))
 
-# Single-domain inference
-counts = rng.integers(1, 200, size=(100, 50))
-result = infer_single(
+result = infer_network(
     counts,
-    mode="fast",
-    top_k=10,
-    calibration="permutation",
-    n_permutations=100,
+    estimator="weighted_sparse",     # or "adaptive_threshold", "pd_sparse"
+    zero_policy="multiplicative",    # or "pseudocount", "complete_case"
+    selection="stability",
+    n_resamples=100,
     seed=0,
 )
-print(result.edges.pairs.shape, result.edges.scores[:5])
-print("approx q-values:", result.edges.qvalue_approx[:5])
 
-# Cross-domain inference with optional signed biological prior
-counts_x = rng.integers(1, 200, size=(100, 50))
-counts_y = rng.integers(1, 200, size=(100, 60))
-priors = [
-    PriorEdge(source_feature=3, target_feature=12,
-              expected_sign=-1, confidence=0.8,
-              provenance="crispr_spacer"),
-]
-cross = infer_cross(
-    counts_x, counts_y,
-    mode="fast", top_k=10,
-    prior=priors, prior_weight=0.5,
-    calibration="permutation", n_permutations=100, seed=0,
-)
-print(cross.edges.pairs.shape, cross.edges.scores[:5])
+print(result.edges.pairs[:5], result.edges.scores[:5])
+print("selection prob:", result.edges.selection_probability[:5])
+print("estimator:", result.diagnostics.estimator)
+print("converged:", result.diagnostics.converged)
+print("min eigenvalue:", result.diagnostics.min_eigenvalue)
 ```
 
-`infer_single` and `infer_cross` both return a `NetworkResult` with:
+`NetworkResult` carries:
 
-- `edges.pairs` — `(n_edges, 2)` array of `(i, j)` feature indices
-  (canonical `i < j` for single-domain; `i ∈ X, j ∈ Y` for cross-domain)
-- `edges.scores` — refined Pearson correlation per edge
-- `edges.pvalue_approx`, `edges.qvalue_approx` — populated only when
-  `calibration="permutation"`
-- `diagnostics` — adaptive growth metadata, candidate density, prior
-  bookkeeping, and the explicit calibration method tag
-- `initial_matrix` — full dense matrix when `mode="strict"`, else `None`
-- `calibration` — `CalibrationResult` with the full null distribution,
-  or `None` when `calibration="none"`
+- `edges` — `EdgeTable(pairs, scores, selection_probability, pvalue_approx, qvalue_approx)`.
+  `selection_probability` is the primary uncertainty output. `pvalue_approx`
+  / `qvalue_approx` stay `None` until a calibration procedure whose
+  simulation FDR behavior has been measured fills them in.
+- `diagnostics` — `EstimatorDiagnostics(estimator, lambda_value, converged,
+  iterations, min_eigenvalue, calibration_method, uncertainty_interpretation,
+  preprocess_report, notes)`.
+- `correlation` — full `(p, p)` correlation matrix the estimator produced.
 
 ---
 
-## Feasibility benchmarks
+## Estimator candidates
 
-The repository ships two benchmark runners. They write per-method-per-cell
-rows to `data/falcon_sr_*_feasibility.csv`.
+Three candidates share the public entrypoint. Each is a clean-room Python
+implementation derived from the published method description, not copied from
+any reference R code.
+
+| Key | Description |
+|---|---|
+| `adaptive_threshold` | COAT-style composition-adjusted thresholding with hard or soft thresholding. |
+| `weighted_sparse` | fastCCLasso-style weighted soft-thresholded covariance, alternating offset + soft-threshold updates. |
+| `pd_sparse` | Adaptive threshold + diagonal-loading PD correction that preserves selected support. |
+
+Three zero-handling policies are exposed as a sensitivity axis:
+`multiplicative`, `pseudocount`, `complete_case`. The default may only be
+chosen after the training grid is evaluated; the benchmark records
+`zero_policy` per row so the choice never sneaks in.
+
+---
+
+## Benchmark
+
+The frozen benchmark schema is documented in design §8. A local run looks
+like:
 
 ```bash
-# Single-domain feasibility grid
-uv run python benchmarks/falcon_sr_single.py \
-    --n 100 500 --p 100 500 1000 --top-k 10 25 50 --reps 3
-
-# Cross-domain feasibility grid (SparXCC Case-C style simulator)
-uv run python benchmarks/falcon_sr_cross.py \
-    --n 100 500 --pq 100,100 500,500 --top-k 10 25 --reps 3
-
-# Run both with defaults
-./benchmarks/run_all.sh
+uv run python benchmarks/run_benchmark.py \
+    --split training \
+    --output data/bench_training.csv \
+    --reps 1
 ```
 
-Each cell runs Falcon-SR alongside SparCC / SparXCC base / SparXCC iter /
-Pearson(CLR) and reports candidate recall, edge overlap, sign accuracy,
-AUROC, Recall@K, wall-clock, and peak memory. The runners write rows as
-each method finishes, so partial output is durable.
+The holdout grid is bigger and is wrapped in a generated server script:
+
+```bash
+bash benchmarks/run_server_holdout.sh
+```
+
+R baselines (`fastCCLasso`, `COAT`, `SECOM`) are invoked via subprocess
+adapters that **skip with an explicit reason** when R or the named package
+is not installed. The production package never invokes R.
 
 ---
 
-## Design
+## Public-data validation
 
-- `docs/superpowers/specs/2026-06-01-falcon-sr-design.md` — algorithmic
-  specification (single + cross + priors + calibration).
-- `docs/superpowers/specs/2026-06-02-falcon-sr-rewrite-execution-design.md`
-  — execution / migration design that captures the cross-domain refinement
-  geometry, prior closed form, and base-only permutation approximation.
-- `docs/methodology.md` — narrative method description.
-- `docs/decision-log.md` — design decisions and their motivation.
+Public-data evaluation reports stability and reproducibility, not biological
+truth. The repository commits download instructions and stable identifiers
+only — never raw third-party archives.
+
+| Dataset | Identifier |
+|---|---|
+| SECOM archive (Lin, Eggesbo, Peddada 2022) | https://doi.org/10.5281/zenodo.6809029 |
+| NIH HMP umbrella BioProject | `PRJNA43021` |
+| HMP 16S rRNA diversity subproject | `PRJNA48489` |
+
+See `data/README.md` and `data/public/*.md` for the download and processing
+recipes.
+
+---
+
+## Acceptance gates
+
+The selected estimator must clear all six gates on frozen holdout cells
+before the repository asserts an advantage. Until then this section
+honestly reports `not yet evaluated`.
+
+| # | Gate | Status |
+|---|---|---|
+| 1 | AUROC and Recall@K each exceed the strongest matched-estimand baseline on sparse and zero-inflated scenarios | not yet evaluated |
+| 2 | Empirical FDR reported at nominal targets `0.01`, `0.05`, `0.10`; q-values exposed only if calibration is defensible across holdout scenarios | not yet evaluated |
+| 3 | Medium- and high-dimensional runtime and peak memory each improve against the strongest accurate baseline | not yet evaluated |
+| 4 | All selected-estimator runs converge or return an explicit non-convergence diagnostic | code path supported; full grid not yet run |
+| 5 | Public real-data subsampling produces a stability report with dataset identifier, seed, resample count, and selection threshold | scripts scaffolded; report not yet produced |
+| 6 | Every numerical claim maps to a committed source-data row and generator command | infrastructure in place (`data/manifest.tsv`); no claims yet |
 
 ---
 

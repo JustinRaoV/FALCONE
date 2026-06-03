@@ -1,180 +1,112 @@
-# Decision Log — Falcon-SR
+# Decision Log — Single-Domain Estimator Rebuild
 
-## Active decisions
+This log records design decisions taken during the 2026-06-02 rebuild. The
+authoritative design is in
+[`superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md`](superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md).
+The pre-rebuild log was deleted with the screen-refine implementation; the
+git history retains the historical entries.
 
-### 2026-06-02 — Replace proportionality framing with latent log-abundance correlation
+## 2026-06-02 — Rebuild scope
 
-**Decision.** The legacy FastProp / RandProp / CrossNet code, which
-estimated the Aitchison proportionality metric $\rho_p$, has been removed.
-Falcon-SR now estimates the latent log-abundance Pearson correlation
-targeted by SparCC and SparXCC Case-C. This change is required by the
-2026-06-01 design specification (§3 non-goals: "Treat proportionality as
-a synonym for latent log-abundance correlation").
+**Decision.** Drop the screen-refine architecture and rebuild the package
+around a single-domain compositional network estimator with three Python-only
+candidates: `adaptive_threshold`, `weighted_sparse`, and `pd_sparse`.
+Cross-domain inference and signed biological priors are explicitly deferred.
 
-**Why.** Proportionality and latent correlation are different estimands.
-Comparing $\rho_p$ to SparCC outputs implies an equivalence that does not
-hold, and any speed claim built on that comparison would be incoherent. By
-aligning the estimand we make head-to-head benchmarks meaningful and
-honest.
+**Why.** The committed feasibility tables exposed an architectural
+mismatch: the screen-refine fast path computed a full dense SparCC-compatible
+base matrix before screening, so the screen and sparse-refine stages added
+work after the quadratic bottleneck rather than removing it. The hard cells
+(`n=100, p=1000`) were 6–25× slower than the SparCC closed-form baseline at
+worse candidate recall.
 
-**Where it shows up.** `src/falcon/__init__.py` now exports only
-`infer_single`, `infer_cross`, `PriorEdge`. The legacy
-`fastprop` / `randprop` / `crossnet` / `clr_transform` /
-`multiplicative_replacement` / `extract_network` / `fastprop_pvalues`
-symbols are gone, along with `benchmarks/run_on_server.py` and the legacy
-`data/*.csv` outputs and the prior `manuscript/` directory.
+**Where it shows up.** `manuscript/`, `data/falcon_sr_*_feasibility.csv`,
+`benchmarks/{falcon_sr_single,falcon_sr_cross,comparison_methods}.py`, and the
+old `src/falcon/{single,cross,prior,screen,calibration,types}.py` modules are
+removed. The previous design and execution-design specs are removed because
+they describe an algorithm we no longer ship; the new design lives in
+`docs/superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md`.
 
-### 2026-06-02 — Cross-domain refinement uses edge-driven feature pruning
+## 2026-06-02 — Three estimator candidates behind one interface
 
-**Decision.** When a candidate $(i, k)$ is excluded as a strong edge, the
-entire X row $i$ and Y column $k$ are dropped from the centring pool for
-the next round. This preserves the $H_p \otimes H_q^\top$ identity that
-underlies SparXCC base and iter; the alternative (non-rectangular per-cell
-exclusion) breaks the centring algebra.
+**Decision.** All three candidates share the `infer_network` entrypoint and
+return the same `NetworkResult`. The selected production estimator is chosen
+on the training grid only, and is frozen before the holdout grid is touched.
 
-**Why.** Edge-driven pruning gives two clean properties: (a) reduces to
-SparXCC base when no edges are excluded; (b) is interchangeable with
-SparXCC iter when the candidate set is full and the exclusion threshold
-matches. Both make it possible to gate the implementation against the
-published SparXCC reference.
+**Why.** A single public surface keeps the call sites stable across the
+acceptance evaluation. Different candidate paths sharing one schema avoid
+schema drift between training and holdout reports.
 
-### 2026-06-02 — Prior penalty is post-hoc analytic shrinkage
+## 2026-06-02 — Stability selection is the primary uncertainty output
 
-**Decision.** Signed priors do **not** enter the iterative exclusion
-choices. After sparse refinement, candidate edges with a matching prior
-record have their score replaced by the closed-form minimiser of
-$(\rho - \hat\rho_{\text{data}})^2 + \lambda\,\text{conf}\,(\rho - \text{sign}\cdot\text{target})^2$,
-which is
-$\rho = (\hat\rho_{\text{data}} + \lambda\,\text{conf}\,\text{sign}\,\text{target})
-        / (1 + \lambda\,\text{conf})$.
+**Decision.** `selection_probability` (subsample frequency of non-zero
+support) is the default uncertainty output. `pvalue_approx` and
+`qvalue_approx` stay `None` unless a calibration procedure whose simulation
+FDR behaviour has been measured fills them in. The
+`uncertainty_interpretation` field on `EstimatorDiagnostics` names the regime
+explicitly.
 
-**Why.** Spec §10 demands a soft direction, not an invented effect size.
-Letting priors steer refinement would risk hiding wrong-sign data
-signals; the post-hoc formula keeps data sovereign at every iterative
-step and only blends at the end. `prior_weight = 0` collapses the formula
-to $\hat\rho_{\text{data}}$ identically, so existing call sites cannot
-trigger prior side-effects by accident.
+**Why.** The previous architecture exposed permutation p-values that were
+labeled `permutation_base_only` to flag that calibration was approximate.
+That is too easy to forget. Selection probability under a fixed seed is
+bit-reproducible and has a clear interpretation; q-values come back only
+when we have measured FDR control on holdout cells.
 
-### 2026-06-02 — Permutation calibration permutes the base score only
+## 2026-06-02 — Diagonal loading for PD correction
 
-**Decision.** `calibrate_single` / `calibrate_cross` recompute the
-closed-form SparCC base correlation (or the SparXCC double-centred score)
-per permutation, **not** the full sparse refine pipeline. The
-`CalibrationResult.method` field is `permutation_base_only` so downstream
-code never treats the result as a calibration-tight test.
+**Decision.** The `pd_sparse` candidate uses diagonal loading
+(`Sigma += (floor - min_eig) * I` when `min_eig < floor`) rather than
+Higham's nearest-PD projection.
 
-**Why.** Full per-permutation refinement costs $R \cdot
-\mathcal{O}(p^3)$ which puts $p = 1000, R = 100$ beyond the feasibility
-wall-clock budget. The base-only approximation is conservative under most
-conditions but is not guaranteed; spec §19 risk 4 stays explicit rather
-than being silently fixed.
+**Why.** Higham's projection touches every off-diagonal entry and silently
+destroys the support recovered by adaptive thresholding. Diagonal loading
+preserves the support exactly and is idempotent under a fixed floor.
 
-### 2026-06-02 — Calibration off by default in benchmarks for time comparison
+## 2026-06-02 — R baselines run only in benchmark adapters
 
-**Decision.** `falcon_sr_fast` cells in
-`benchmarks/falcon_sr_single.py` and `benchmarks/falcon_sr_cross.py` run
-with `calibration="none"` so their wall-clock numbers are apples-to-apples
-with SparCC / Pearson(CLR) / SparXCC base / SparXCC iter. A separate
-`*_calibrated` method row exposes the calibration overhead explicitly.
+**Decision.** `fastCCLasso`, `COAT`, and `SECOM` are invoked through
+subprocess adapters in `benchmarks/r_adapters.py`. The production package
+does not import or invoke R. When R or the named package is missing the
+adapter returns an `RAdapterSkip` with an explicit reason; the benchmark
+records a "skipped" row instead of a fake numeric result.
 
-**Why.** Combining calibration cost with ranking cost would muddy the
-comparison and let either side cherry-pick. Separate rows let the same
-CSV answer both "how fast is the ranking?" and "how expensive is the
-calibration?".
+**Why.** Vendoring or wrapping LGPL R code at runtime in the production
+package would impose licence constraints far beyond the benchmark scope.
+Subprocess adapters keep the licence boundary clean and let the benchmark
+runner produce schema-valid rows even when R is not installed.
 
-### 2026-06-02 — Inline CLR / multiplicative-replacement helpers in `comparison_methods.py`
+## 2026-06-02 — Frozen schema with `estimand_family` labeling
 
-**Decision.** `benchmarks/comparison_methods.py` defines its own
-`multiplicative_replacement` and `clr_transform` rather than importing
-them from `falcon`.
+**Decision.** Every benchmark row records `estimand_family`. Methods with
+adjacent estimands (precision matrix, nonlinear dependence) are tagged so
+they cannot be silently promoted into match-evidence for an advantage claim.
 
-**Why.** Baselines must be self-contained: they should not silently
-shift if Falcon-SR changes a helper. This also unblocked the legacy-code
-removal (those helpers used to live in the legacy module).
+**Why.** Comparing matched-estimand and adjacent-estimand methods on the
+same axis is the most common way honest-looking benchmark rows mislead
+reviewers. The label makes the comparison rule explicit at row level.
 
-### 2026-06-02 — macOS Accelerate BLAS matmul warnings suppressed
+## 2026-06-02 — Acceptance gates are required before any advantage claim
 
-**Decision.** `pyproject.toml` filters the three spurious "divide by
-zero / overflow / invalid value encountered in matmul" RuntimeWarnings
-emitted by Apple Accelerate + NumPy 2.x on otherwise finite inputs.
-Benchmark runners install the same filter at import.
+**Decision.** The repository must report `not yet evaluated` for the six
+acceptance gates listed in design §14 until the holdout grid is run and
+reviewed. Negative results remain valid outputs; the rebuild does not assume
+victory.
 
-**Why.** The warnings are a known false positive on Apple Silicon;
-they appear even for completely finite matrices and obscure real
-diagnostic output. Real numerical issues remain visible through explicit
-`np.isfinite` checks.
-
-### 2026-06-02 — Benchmark uses pre-filtered counts for parity
-
-**Decision.** Both `benchmarks/falcon_sr_single.py` and
-`benchmarks/falcon_sr_cross.py` run every method on the same matrix
-returned by `prepare_log_composition`, with planted edges remapped to
-the surviving index space.
-
-**Why.** Falcon-SR's preprocessing drops all-zero columns (a hard
-constraint of log-ratio analysis), while `sparcc_py` and `pearson_clr`
-ran on the raw counts in the first pass. At `n=100, p=1000` ~3.7% of
-features were filtered, which propagated to a ~7% drop in
-`candidate_recall` and a spurious AUROC gap between `falcon_sr_strict`
-(0.504) and `sparcc_py` (0.577). After the fix `falcon_sr_strict` and
-`sparcc_py` match to four decimal places, so the algorithm is sound —
-only the comparison was unfair.
-
-## 2026-06-02 feasibility benchmark findings
-
-Run: 3 reps per cell, host = local laptop, BLAS = Accelerate, see
-`data/falcon_sr_single_feasibility.csv` and
-`data/falcon_sr_cross_feasibility.csv`.
-
-**Cross-domain** (the headline finding):
-- `edge_overlap_vs_sparxcc_iter ≥ 0.984` on all 8 cells (spec gate 0.95 ✓).
-- `sign_accuracy_vs_truth = 1.000` on all cells (spec gate 0.95 ✓).
-- AUROC vs planted truth ≥ 0.87.
-- Optional prior consistently improves the hard n=100, (p, q)=(500, 500)
-  cell: candidate recall 0.756 → 0.873, AUROC 0.868 → 0.927; no regression
-  on easy cells.
-
-**Single-domain** (after benchmark-parity fix above):
-- `edge_overlap_vs_sparcc ≥ 0.95` on every n ≥ 500 cell except
-  (p=1000, top_k≤25) where the screen budget under-covers the
-  candidate density; raising top_k to 50 recovers 0.998 overlap.
-- Sign accuracy ≥ 0.97 on every n ≥ 500 cell.
-- At n=100/p=1000 the absolute AUROC is 0.54–0.58 for every method
-  including SparCC; the regime is genuinely underdetermined (≈10⁴
-  planted correlations from 100 samples), not an algorithm bug.
-- `falcon_sr_strict` matches `sparcc_py` to four decimal places at
-  every cell where neither hits a numerical fallback, confirming the
-  iterative-exclusion implementation is equivalent to SparCC in the
-  ranges where SparCC itself produces a reliable estimate.
-
-**Wall-clock at p ≤ 1000**:
-- Falcon-SR fast (no calibration): 0.01–0.10 s.
-- Falcon-SR fast + permutation calibration (R=100): 1.6 s.
-- SparCC (single closed-form GEMM): 0.008 s.
-- Falcon-SR strict (reference SparCC exclusion path): 0.10–0.13 s.
-
-The dense base GEMM dominates at these sizes, so Falcon-SR fast is
-~10× slower than SparCC's closed form here. This matches spec §19 risk 2;
-the screen-refine speedup is expected to appear above p ≈ 5000 where
-SparCC's refinement loop becomes the bottleneck. Random-projection
-screening (spec §3 non-goal for this release) would be the path to push
-into that regime.
+**Why.** This is the constraint that drove the rebuild in the first place.
+The previous implementation made performance claims its own feasibility
+tables contradicted. Naming the gates and refusing to remove the
+"not yet evaluated" status until the holdout grid is in is the cheapest
+forcing function to keep that from recurring.
 
 ## Open questions
 
-- **Selective-inference correction for candidate-only calibration.** Spec
-  §19 risk 4. Not addressed in this rewrite. A follow-up plan must decide
-  whether to ship sample-splitting or a selection-aware test before the
-  manuscript claims power / FDR control.
-- **Random-projection screening for $p > 5000$.** Spec §3 lists this as
-  out of scope for the first release. Will need a separate plan.
-- **Real-data validation.** Spec §14 lists candidate public datasets;
-  this rewrite leaves them for the next plan since each dataset has its
-  own preprocessing and licence pitfalls.
-
-## Historical (superseded) entries
-
-The pre-2026-06-02 entries from this file lived in the proportionality
-framing and are no longer accurate; consult git history if you need to
-recover them. The shape of the change is described above under "Replace
-proportionality framing with latent log-abundance correlation".
+* Default zero policy. `multiplicative`, `pseudocount`, and `complete_case`
+  are exposed as a sensitivity axis. The default may be chosen only after
+  the training grid records FDR and runtime under each policy.
+* Default thresholding mode for `adaptive_threshold` (hard vs. soft). To be
+  frozen on the training grid before any holdout cell is touched.
+* Whether `pd_sparse` ships in the public API. Retained only if PD
+  correction improves numerical reliability without losing accuracy or
+  efficiency on the training grid.
+* Approximate q-values. Exposed only if observed simulation FDR is
+  defensible across holdout scenarios; otherwise these stay `None`.
