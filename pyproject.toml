@@ -61,6 +61,9 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]
+markers = [
+    "diff_baseline: slow per-commit differential test against weighted_sparse baseline (~10 min, but trains at ~15s)",
+]
 filterwarnings = [
     # macOS Accelerate BLAS + NumPy 2.x spuriously emits
     # "divide by zero / overflow / invalid value encountered in matmul"
