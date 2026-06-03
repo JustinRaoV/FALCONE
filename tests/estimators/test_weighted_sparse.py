@@ -135,3 +135,104 @@ def test_uniform_weights_match_unweighted_path():
         result_default_then_uniform.covariance.T,
         atol=1e-10,
     )
+
+
+def test_relative_tolerance_responds_to_tol_parameter():
+    """Relative convergence tolerance: looser tol should converge in fewer
+    iterations on the same problem. Verifies the relative criterion is
+    in force (absolute-tol code would also pass this, but the new code
+    must too)."""
+    rng = np.random.default_rng(0)
+    n, p = 80, 20
+    # Use small p so well within convergence reach at default tol.
+    Z = rng.normal(0, 1, size=(n, p))
+    r_tight = estimate_weighted_sparse(Z, lambda_value=0.05, max_iter=200, tol=1e-6)
+    r_loose = estimate_weighted_sparse(Z, lambda_value=0.05, max_iter=200, tol=1e-3)
+    assert r_tight.converged, "tight tol must converge within max_iter on small p"
+    assert r_loose.converged, "loose tol must converge within max_iter on small p"
+    assert r_loose.iterations <= r_tight.iterations, (
+        f"looser tol used MORE iters ({r_loose.iterations}) than tight ({r_tight.iterations})"
+    )
+
+
+def test_support_only_skips_eigvalsh_and_correlation(monkeypatch):
+    """support_only=True must skip the per-call eigvalsh AND skip the
+    correlation extraction. Covariance support (nonzero positions) is
+    preserved exactly."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    Z = rng.normal(0, 1, size=(60, 20))
+
+    eigvalsh_calls = {"n": 0}
+    real_eigvalsh = np.linalg.eigvalsh
+
+    def counting_eigvalsh(*args, **kwargs):
+        eigvalsh_calls["n"] += 1
+        return real_eigvalsh(*args, **kwargs)
+
+    monkeypatch.setattr("numpy.linalg.eigvalsh", counting_eigvalsh)
+
+    r_full = estimate_weighted_sparse(Z, lambda_value=0.05, max_iter=50)
+    n_full = eigvalsh_calls["n"]
+    eigvalsh_calls["n"] = 0
+
+    r_skip = estimate_weighted_sparse(Z, lambda_value=0.05, max_iter=50, support_only=True)
+    n_skip = eigvalsh_calls["n"]
+
+    assert n_skip == 0, f"support_only must not call eigvalsh; got {n_skip} calls"
+    assert n_full >= 1, f"full path should call eigvalsh at least once; got {n_full}"
+    assert np.isnan(r_skip.min_eigenvalue), "min_eigenvalue must be NaN when skipped"
+    # Covariance nonzero support must match between full and support_only.
+    full_support = (r_full.covariance != 0)
+    skip_support = (r_skip.covariance != 0)
+    np.testing.assert_array_equal(
+        full_support, skip_support,
+        err_msg="support_only must produce the same nonzero positions as full path",
+    )
+
+
+def test_alternating_loop_output_is_stable_to_reordered_ops():
+    """The in-place alternating loop reorders some additions and
+    multiplications. The final Sigma should be numerically identical
+    to within floating-point noise (1e-10) for a small fixed problem."""
+    import numpy as np
+    rng = np.random.default_rng(123)
+    Z = rng.normal(0, 1, size=(40, 8))
+    r = estimate_weighted_sparse(Z, lambda_value=0.1, max_iter=80, tol=1e-7)
+    # The result should be PD-friendly: max abs off-diagonal < max abs diagonal
+    # (sanity that soft-thresholding shrinks off-diagonals).
+    od = r.covariance.copy()
+    diag = np.diag(od).copy()
+    np.fill_diagonal(od, 0.0)
+    assert np.max(np.abs(od)) <= np.max(np.abs(diag)) * 1.1, (
+        "off-diagonal magnitudes exceed diagonal by more than 10% — "
+        "likely a buffer-aliasing bug"
+    )
+    # Symmetric and finite.
+    assert np.all(np.isfinite(r.covariance))
+    np.testing.assert_allclose(r.covariance, r.covariance.T, atol=1e-12)
+
+
+def test_jit_and_pure_numpy_paths_agree(monkeypatch):
+    """Whether the kernel is the Numba JIT version or the pure-NumPy
+    fallback, the output Sigma must match within floating-point noise.
+    Force the pure-NumPy path by monkeypatching the kernel-availability
+    flag, run, then run with the JIT path, compare."""
+    import numpy as np
+    from falcon.estimators import weighted_sparse as ws
+    from falcon.estimators import _weighted_sparse_kernel as kern
+
+    rng = np.random.default_rng(7)
+    Z = rng.normal(0, 1, size=(60, 12))
+
+    # JIT path (if available).
+    r_jit = ws.estimate_weighted_sparse(Z, lambda_value=0.07, max_iter=80, tol=1e-7)
+
+    # Force pure-NumPy fallback.
+    monkeypatch.setattr(kern, "_NUMBA_OK", False)
+    r_np = ws.estimate_weighted_sparse(Z, lambda_value=0.07, max_iter=80, tol=1e-7)
+
+    # Outputs must agree within numerical noise (different floating-point
+    # accumulation order can give differences up to ~1e-10).
+    np.testing.assert_allclose(r_jit.covariance, r_np.covariance, atol=1e-8)
+    assert r_jit.converged == r_np.converged

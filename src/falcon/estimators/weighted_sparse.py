@@ -42,6 +42,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from falcon.estimators import _weighted_sparse_kernel as _kernel
+
 
 @dataclass(frozen=True)
 class WeightedSparseResult:
@@ -91,6 +93,7 @@ def estimate_weighted_sparse(
     weights: np.ndarray | None = None,
     max_iter: int = 200,
     tol: float = 1e-6,
+    support_only: bool = False,
 ) -> WeightedSparseResult:
     """Estimate the basis covariance via weighted soft thresholding."""
     if lambda_value < 0:
@@ -117,34 +120,76 @@ def estimate_weighted_sparse(
     threshold_off = lambda_value / np.maximum(W ** 2, 1e-12)
     np.fill_diagonal(threshold_off, 0.0)
 
+    # Preallocated buffers for the alternating loop. We rotate
+    # (Sigma, Sigma_new) between iterations to avoid copying.
     Sigma = S_clr.copy()
+    Sigma_new = np.empty_like(Sigma)
+    delta_buf = np.empty_like(Sigma)
+    M_buf = np.empty_like(Sigma)
+    abs_buf = np.empty_like(Sigma)
+    sign_buf = np.empty_like(Sigma)
+
     f = np.zeros(p)
     converged = False
     iterations = 0
+    tol_sq = tol * tol  # compare squared norms to avoid the sqrt
+    # Path is chosen per call (not at import) so the fallback test can
+    # monkeypatch _NUMBA_OK between calls.
+    use_jit = _kernel.is_available()
+
     for it in range(1, max_iter + 1):
-        Sigma_prev = Sigma.copy()
+        if use_jit:
+            delta_sq, scale_sq = _kernel._alternating_step(
+                S_clr, threshold_off, Sigma, Sigma_new, f, p,
+            )
+        else:
+            # Pure-NumPy in-place fallback (the A4 implementation).
+            # Step A — closed-form offset update from R = Sigma - S_clr.
+            # Reuse delta_buf as R.
+            np.subtract(Sigma, S_clr, out=delta_buf)
+            R_sum = delta_buf.sum(axis=1)
+            total = delta_buf.sum()
+            # In-place write so f stays the same array across iterations,
+            # matching the JIT kernel which mutates f in place.
+            f[:] = (R_sum - total / (2 * p)) / p
 
-        # Step A — closed-form offset update from R = Sigma - S_clr.
-        R = Sigma - S_clr
-        R_sum = R.sum(axis=1)
-        total = R.sum()
-        f = (R_sum - total / (2 * p)) / p
+            # Step B — soft-threshold the off-diagonal of M = S_clr + f1' + 1f';
+            # diagonal stays unpenalized.
+            np.add(S_clr, f[:, None], out=M_buf)
+            M_buf += f[None, :]
+            np.abs(M_buf, out=abs_buf)
+            np.subtract(abs_buf, threshold_off, out=abs_buf)
+            np.maximum(abs_buf, 0.0, out=abs_buf)
+            np.sign(M_buf, out=sign_buf)
+            np.multiply(sign_buf, abs_buf, out=Sigma_new)
+            np.fill_diagonal(Sigma_new, np.diag(M_buf))
+            # Symmetrize via temporary to avoid aliasing on the in-place add
+            # of Sigma_new + Sigma_new.T.
+            np.add(Sigma_new, Sigma_new.T, out=delta_buf)
+            np.multiply(delta_buf, 0.5, out=Sigma_new)
 
-        # Step B — soft-threshold the off-diagonal of M = S_clr + f1' + 1f';
-        # diagonal stays unpenalized.
-        M = S_clr + f[:, None] + f[None, :]
-        Sigma = np.sign(M) * np.maximum(np.abs(M) - threshold_off, 0.0)
-        np.fill_diagonal(Sigma, np.diag(M))
-        Sigma = 0.5 * (Sigma + Sigma.T)
+            # Frobenius delta_sq and scale_sq via einsum (allocation-free).
+            np.subtract(Sigma_new, Sigma, out=delta_buf)
+            delta_sq = float(np.einsum("ij,ij->", delta_buf, delta_buf))
+            scale_sq = max(float(np.einsum("ij,ij->", Sigma_new, Sigma_new)), 1e-24)
 
-        delta = np.linalg.norm(Sigma - Sigma_prev)
         iterations = it
-        if delta < tol:
+        # Rotate buffers: Sigma becomes the just-computed value; the old
+        # Sigma buffer is reused next iteration as Sigma_new.
+        Sigma, Sigma_new = Sigma_new, Sigma
+
+        if delta_sq / max(scale_sq, 1e-24) < tol_sq:
             converged = True
             break
 
-    correlation = _correlation_from_covariance(Sigma)
-    min_eig = float(np.linalg.eigvalsh(Sigma).min())
+    if support_only:
+        # Skip the O(p^3) eigvalsh and the unused correlation extraction.
+        # min_eigenvalue is recorded as NaN to signal "not computed".
+        correlation = Sigma
+        min_eig = float("nan")
+    else:
+        correlation = _correlation_from_covariance(Sigma)
+        min_eig = float(np.linalg.eigvalsh(Sigma).min())
 
     return WeightedSparseResult(
         covariance=Sigma,
