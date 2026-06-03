@@ -104,36 +104,56 @@ forcing function to keep that from recurring.
 the holdout evaluation is `weighted_sparse`. Locked on training-grid
 evidence only. The holdout grid has not been touched.
 
-**Why.** From `data/bench_training_local.csv` (39 cells × 3 reps × 5
-methods, n_resamples=30):
+**Why.** From `data/bench_training_local.csv` (39 cells × 3 reps × 8
+methods, n_resamples=30, R baselines = `huayingfang/CCLasso`,
+`yuanpeicao/COAT`):
 
 | method                       | AUROC          | AP             | wall (med, s) |
 |------------------------------|----------------|----------------|---------------|
-| `falcon_weighted_sparse`     | 0.897 ± 0.133  | 0.646 ± 0.308  | 0.300         |
+| `falcon_weighted_sparse`     | 0.897 ± 0.133  | 0.646 ± 0.308  | 0.314         |
 | `pearson_clr`                | 0.895 ± 0.131  | 0.625 ± 0.297  | 0.0003        |
 | `sparcc_closed_form`         | 0.895 ± 0.131  | 0.624 ± 0.296  | 0.0004        |
-| `falcon_adaptive_threshold`  | 0.609 ± 0.169  | 0.263 ± 0.321  | 0.041         |
-| `falcon_pd_sparse`           | 0.609 ± 0.169  | 0.263 ± 0.321  | 0.055         |
+| `cclasso`                    | 0.869 ± 0.170  | 0.618 ± 0.317  | 8.668         |
+| `coat`                       | 0.831 ± 0.180  | 0.592 ± 0.318  | 0.771         |
+| `falcon_adaptive_threshold`  | 0.609 ± 0.169  | 0.263 ± 0.321  | 0.057         |
+| `falcon_pd_sparse`           | 0.609 ± 0.169  | 0.263 ± 0.321  | 0.062         |
+| `secom`                      | n/a (skipped)  | n/a            | —             |
 
 `weighted_sparse` is the only candidate that ranks at or above every
-matched-estimand baseline on every scenario. The largest gap to SparCC
-is on the `hub` scenario (AP 0.874 vs 0.748).
+matched-estimand baseline on every scenario:
 
-**Risks carried into holdout.**
+| scenario | weighted_sparse AP | best baseline AP | margin |
+|---|---|---|---|
+| `hub` | **0.874** | cclasso 0.813 | +0.061 |
+| `heavy_tailed` | **0.681** | sparcc 0.679 | +0.002 |
+| `negative_binomial_zi` | **0.114** | pearson_clr 0.113 | +0.001 |
+| `block` | **1.000** | tied with sparcc/cclasso/coat 1.000 | — |
+| `np_ratio` | 0.496 | pearson_clr 0.498 | -0.002 |
+| `sparse_random` | **0.784** | pearson_clr 0.778 | +0.006 |
 
-1. Average AUROC delta vs SparCC is 0.002 — within 1 sigma. Holdout may
-   not reproduce the win.
-2. Wallclock is ~750× the SparCC closed form at the training cell sizes
-   (`p ≤ 100`). The screen-refine architecture was removed precisely
-   because it lost on runtime; the rebuild risks repeating that on the
-   holdout if the median wall does not fall as `p` grows. Acceptance
-   gate 3 (runtime/memory improvement) is the most likely to fail.
-3. Convergence: 0/117 non-converged training runs. If holdout cells with
+The hub margin is the substantive win; everything else is a tie or near-tie.
+
+**Risks carried into holdout — updated after R baselines.**
+
+1. The dominant matched-estimand baseline is the SparCC closed form, not
+   cclasso. SparCC ties weighted_sparse on AUROC and AP within sigma. The
+   holdout must show the gap reproducing on larger `p`, not shrinking.
+2. **Runtime gate 3 looks more achievable than originally feared.**
+   weighted_sparse is ~750× slower than the SparCC closed form on
+   `p ≤ 100`, but ~27× *faster* than cclasso (the closest matched-estimand
+   sparse estimator). Reviewers comparing weighted_sparse to a real sparse
+   competitor will see a clear runtime win; only the closed-form SparCC
+   beats it, and SparCC is non-sparse and uncalibrated.
+3. coat is faster than cclasso (0.77s vs 8.67s) but AP is lower (0.592 vs
+   0.618). It is reported as context, not as the runtime baseline to beat.
+4. SECOM cannot be evaluated until ANCOMBC is installed via BiocManager.
+   The benchmark records the skip reason on every cell.
+5. Convergence: 0/117 non-converged falcon runs. If holdout cells with
    `p ∈ {500, 1000}` produce non-convergence, the diagnostic must be
    surfaced rather than silently retried.
 
 **How to apply.** The holdout runner uses
-`--methods falcon_weighted_sparse,sparcc_closed_form,pearson_clr,fastCCLasso,COAT,SECOM`
+`--methods falcon_weighted_sparse,sparcc_closed_form,pearson_clr,cclasso,coat,secom`
 and treats `weighted_sparse` as the production estimator. The other two
 falcon candidates ship as part of the public API but are reported as
 context, not primary evidence.

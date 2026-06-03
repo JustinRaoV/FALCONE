@@ -20,7 +20,7 @@ cd "$(dirname "$0")/.."
 OUTPUT="${OUTPUT:-data/bench_holdout.csv}"
 N_RESAMPLES="${N_RESAMPLES:-100}"
 REPS="${REPS:-3}"
-METHODS="${METHODS:-falcon_weighted_sparse,falcon_adaptive_threshold,falcon_pd_sparse,sparcc_closed_form,pearson_clr,fastCCLasso,COAT,SECOM}"
+METHODS="${METHODS:-falcon_weighted_sparse,falcon_adaptive_threshold,falcon_pd_sparse,sparcc_closed_form,pearson_clr,cclasso,coat,secom}"
 
 uv run python benchmarks/run_benchmark.py \
     --split holdout \

@@ -65,24 +65,25 @@ def test_python_baselines_match_advertised_set():
 def test_r_adapter_skips_when_rscript_missing():
     counts = _planted_counts()
     with mock.patch.object(shutil, "which", return_value=None):
-        out = run_r_baseline("fastCCLasso", counts)
+        out = run_r_baseline("cclasso", counts)
     assert isinstance(out, RAdapterSkip)
     assert "Rscript" in out.reason
 
 
-def test_r_adapter_skips_when_package_not_installed():
+def test_r_adapter_skips_when_baseline_dir_missing(tmp_path: Path, monkeypatch):
     counts = _planted_counts()
-
-    class FakeProc:
-        returncode = 2
-        stdout = ""
-        stderr = ""
-
-    with mock.patch.object(shutil, "which", return_value="/usr/bin/Rscript"):
-        with mock.patch("benchmarks.r_adapters.subprocess.run", return_value=FakeProc()):
-            out = run_r_baseline("COAT", counts)
+    monkeypatch.setenv("FALCON_R_BASELINE_DIR", str(tmp_path / "no_such_dir"))
+    with mock.patch.object(shutil, "which", return_value="/usr/local/bin/Rscript"):
+        out = run_r_baseline("coat", counts)
     assert isinstance(out, RAdapterSkip)
-    assert "not installed" in out.reason
+    assert "not found" in out.reason
+
+
+def test_r_adapter_secom_always_reports_skip_with_reason():
+    counts = _planted_counts()
+    out = run_r_baseline("secom", counts)
+    assert isinstance(out, RAdapterSkip)
+    assert "ANCOMBC" in out.reason or "BiocManager" in out.reason
 
 
 def test_r_adapter_rejects_unknown_method():
@@ -92,7 +93,7 @@ def test_r_adapter_rejects_unknown_method():
 
 
 def test_r_baselines_advertised_list():
-    assert set(R_BASELINES) == {"fastCCLasso", "COAT", "SECOM"}
+    assert set(R_BASELINES) == {"cclasso", "coat", "secom"}
 
 
 # --- Runner schema -----------------------------------------------------------

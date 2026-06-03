@@ -109,9 +109,26 @@ The holdout grid is bigger and is wrapped in a generated server script:
 bash benchmarks/run_server_holdout.sh
 ```
 
-R baselines (`fastCCLasso`, `COAT`, `SECOM`) are invoked via subprocess
-adapters that **skip with an explicit reason** when R or the named package
-is not installed. The production package never invokes R.
+R baselines are invoked via subprocess adapters that **skip with an
+explicit reason** when R or the upstream source repos are not present.
+The production package never invokes R.
+
+| Method | Source | Notes |
+|---|---|---|
+| `cclasso` | https://github.com/huayingfang/CCLasso (LGPL-2.1+) | Fang et al. (2015) v2.0; closest publicly-available analog to fastCCLasso (the 2024 paper does not publish a standalone R package). |
+| `coat` | https://github.com/yuanpeicao/COAT (research code) | Cao, Lin, Li (2019) reference implementation, soft thresholding mode. |
+| `secom` | inside ANCOMBC (Bioconductor) | Lin, Eggesbo, Peddada (2022); always reports skip until the operator runs the BiocManager install on the target host. |
+
+To enable R baselines on a host that already has R:
+
+```bash
+mkdir -p ~/.falcon-r-baselines
+git clone https://github.com/huayingfang/CCLasso.git ~/.falcon-r-baselines/CCLasso
+git clone https://github.com/yuanpeicao/COAT.git    ~/.falcon-r-baselines/COAT
+```
+
+Override the location with `FALCON_R_BASELINE_DIR` if the default is not
+suitable.
 
 ---
 
@@ -142,7 +159,7 @@ honestly reports `not yet evaluated`.
 |---|---|---|
 | 1 | AUROC and Recall@K each exceed the strongest matched-estimand baseline on sparse and zero-inflated scenarios | not yet evaluated |
 | 2 | Empirical FDR reported at nominal targets `0.01`, `0.05`, `0.10`; q-values exposed only if calibration is defensible across holdout scenarios | not yet evaluated |
-| 3 | Medium- and high-dimensional runtime and peak memory each improve against the strongest accurate baseline | not yet evaluated |
+| 3 | Medium- and high-dimensional runtime and peak memory each improve against the strongest accurate baseline | not yet evaluated (training shows weighted_sparse is ~27× faster than `cclasso` and ~750× slower than `sparcc_closed_form` at `p ≤ 100`; holdout must confirm the gap on larger `p`) |
 | 4 | All selected-estimator runs converge or return an explicit non-convergence diagnostic | code path supported; full grid not yet run |
 | 5 | Public real-data subsampling produces a stability report with dataset identifier, seed, resample count, and selection threshold | scripts scaffolded; report not yet produced |
 | 6 | Every numerical claim maps to a committed source-data row and generator command | infrastructure in place (`data/manifest.tsv`); no claims yet |
