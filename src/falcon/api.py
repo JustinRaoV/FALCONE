@@ -189,6 +189,7 @@ def infer_network(
     seed: int = 0,
     calibrator=None,
     scenario_hint: str | None = None,
+    n_jobs: int = 1,
 ) -> NetworkResult:
     """Infer a single-domain compositional network.
 
@@ -251,6 +252,7 @@ def infer_network(
             n_resamples=n_resamples,
             subsample_fraction=subsample_fraction,
             seed=seed,
+            n_jobs=n_jobs,
         )
         sel_prob = stab.selection_probability
         uncertainty = "selection_probability_only"

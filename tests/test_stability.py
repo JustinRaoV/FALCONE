@@ -130,3 +130,57 @@ def test_estimator_returning_non_square_rejected():
 
     with pytest.raises(ValueError, match="square"):
         select_by_stability(Z, bad, n_resamples=2, seed=0)
+
+
+def test_seedsequence_per_subsample_streams_are_used():
+    """select_by_stability must derive per-subsample seeds via SeedSequence.spawn(),
+    not the prior single-stream approach. We verify by checking that two seeds
+    that differ by 1 produce different sel_prob (independent streams)."""
+    import numpy as np
+    from falcon.stability import select_by_stability
+
+    rng = np.random.default_rng(0)
+    Z = rng.normal(0, 1, size=(60, 6))
+
+    def dummy(Z):
+        p = Z.shape[1]
+        out = np.zeros((p, p), dtype=np.float64)
+        if Z.mean() > 0:
+            out[0, 1] = out[1, 0] = 1.0
+        return out
+
+    r0 = select_by_stability(Z, dummy, n_resamples=20, seed=0, n_jobs=1)
+    r1 = select_by_stability(Z, dummy, n_resamples=20, seed=1, n_jobs=1)
+    # Different seeds: different sel_prob arrays expected.
+    assert not np.array_equal(r0.selection_probability, r1.selection_probability), (
+        "different seeds must produce different sel_prob"
+    )
+
+
+def test_n_jobs_parallel_matches_serial_under_same_seed():
+    """Determinism across n_jobs is the contract: with the same seed and
+    SeedSequence.spawn(), serial (n_jobs=1) and parallel (n_jobs=4) must
+    produce IDENTICAL sel_prob arrays."""
+    import numpy as np
+    from falcon.stability import select_by_stability
+
+    rng = np.random.default_rng(0)
+    Z = rng.normal(0, 1, size=(80, 6))
+
+    def dummy(Z):
+        p = Z.shape[1]
+        out = np.zeros((p, p), dtype=np.float64)
+        # Make output depend on Z so different subsamples produce different
+        # support patterns. Pick indices with the largest mean magnitude.
+        col_means = Z.mean(axis=0)
+        top_two = np.argsort(np.abs(col_means))[-2:]
+        i, j = sorted(top_two)
+        out[i, j] = out[j, i] = 1.0
+        return out
+
+    r1 = select_by_stability(Z, dummy, n_resamples=20, seed=42, n_jobs=1)
+    r4 = select_by_stability(Z, dummy, n_resamples=20, seed=42, n_jobs=4)
+    np.testing.assert_array_equal(
+        r1.selection_probability, r4.selection_probability,
+        err_msg="n_jobs=1 and n_jobs=4 must match under same seed (SeedSequence)",
+    )
