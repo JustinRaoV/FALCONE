@@ -55,7 +55,7 @@ def test_processing_script_advertises_unwired_dataset_with_clear_message(tmp_pat
             sys.executable,
             str(REPO / "scripts" / "process_public_data.py"),
             "--dataset",
-            "secom_v1.0.0",
+            "_definitely_not_a_real_dataset_",
             "--input",
             str(archive),
             "--output",
