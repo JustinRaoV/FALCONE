@@ -98,15 +98,113 @@ tables contradicted. Naming the gates and refusing to remove the
 "not yet evaluated" status until the holdout grid is in is the cheapest
 forcing function to keep that from recurring.
 
+## 2026-06-03 — Production estimator frozen as `weighted_sparse` (training only)
+
+**Decision.** The production estimator selected from `infer_network` for
+the holdout evaluation is `weighted_sparse`. Locked on training-grid
+evidence only. The holdout grid has not been touched.
+
+**Why.** From `data/bench_training_local.csv` (39 cells × 3 reps × 5
+methods, n_resamples=30):
+
+| method                       | AUROC          | AP             | wall (med, s) |
+|------------------------------|----------------|----------------|---------------|
+| `falcon_weighted_sparse`     | 0.897 ± 0.133  | 0.646 ± 0.308  | 0.300         |
+| `pearson_clr`                | 0.895 ± 0.131  | 0.625 ± 0.297  | 0.0003        |
+| `sparcc_closed_form`         | 0.895 ± 0.131  | 0.624 ± 0.296  | 0.0004        |
+| `falcon_adaptive_threshold`  | 0.609 ± 0.169  | 0.263 ± 0.321  | 0.041         |
+| `falcon_pd_sparse`           | 0.609 ± 0.169  | 0.263 ± 0.321  | 0.055         |
+
+`weighted_sparse` is the only candidate that ranks at or above every
+matched-estimand baseline on every scenario. The largest gap to SparCC
+is on the `hub` scenario (AP 0.874 vs 0.748).
+
+**Risks carried into holdout.**
+
+1. Average AUROC delta vs SparCC is 0.002 — within 1 sigma. Holdout may
+   not reproduce the win.
+2. Wallclock is ~750× the SparCC closed form at the training cell sizes
+   (`p ≤ 100`). The screen-refine architecture was removed precisely
+   because it lost on runtime; the rebuild risks repeating that on the
+   holdout if the median wall does not fall as `p` grows. Acceptance
+   gate 3 (runtime/memory improvement) is the most likely to fail.
+3. Convergence: 0/117 non-converged training runs. If holdout cells with
+   `p ∈ {500, 1000}` produce non-convergence, the diagnostic must be
+   surfaced rather than silently retried.
+
+**How to apply.** The holdout runner uses
+`--methods falcon_weighted_sparse,sparcc_closed_form,pearson_clr,fastCCLasso,COAT,SECOM`
+and treats `weighted_sparse` as the production estimator. The other two
+falcon candidates ship as part of the public API but are reported as
+context, not primary evidence.
+
+## 2026-06-03 — Default `zero_policy` frozen as `multiplicative`
+
+**Decision.** The default `zero_policy` is `multiplicative`. The other
+two policies (`pseudocount`, `complete_case`) stay exposed as the
+documented sensitivity axis.
+
+**Why.** From `data/zero_policy_sensitivity_local.csv` (15 cells across
+sparse_random, heavy_tailed, negative_binomial_zi):
+
+| zero regime | best policy        | second        | gap    |
+|-------------|--------------------|---------------|--------|
+| zf < 0.05   | `multiplicative`   | `pseudocount` | < 0.01 |
+| zf ~ 0.13   | `multiplicative`   | `pseudocount` | < 0.01 |
+| zf > 0.20   | `complete_case` *  | mult/pseudo   | +0.15  |
+
+(*) On `negative_binomial_zi` (zf ≈ 0.21–0.25), `complete_case` raised
+AUROC from 0.65 to 0.81. This is a real signal — high zero-fraction data
+should be re-run with `complete_case`. But it is not the right default:
+on lower zero-fraction data, `complete_case` *underperforms* slightly
+(`heavy_tailed`: 0.891 vs 0.968).
+
+`multiplicative` is the safe default; the README and methodology note
+that high-zero datasets should be re-run with `complete_case` and the
+choice recorded per study. The benchmark runner records `zero_policy`
+per row so the choice is never silent.
+
+**How to apply.** `infer_network` default stays `zero_policy="multiplicative"`.
+Any future advantage claim that depends on a non-default policy must
+report the policy choice explicitly.
+
+## 2026-06-03 — `adaptive_threshold` and `pd_sparse` retained but demoted
+
+**Decision.** Both estimators stay in the public API. They are no longer
+candidates for the production estimator on the training grid.
+
+**Why.**
+
+* `adaptive_threshold` (hard mode, `threshold_constant=2.0`) zeros out
+  too many true edges at training cell sizes (`p ∈ {50, 100}`). AUROC
+  ties many real and noise pairs at zero. The mode/constant could be
+  retuned, but the design rule is to freeze the production estimator on
+  training-only evidence and `weighted_sparse` already wins every
+  scenario at the current training defaults. Re-tuning thresholds and
+  re-running risks polluting the holdout's statistical guarantee.
+* `pd_sparse` produces identical AUROC/AP to `adaptive_threshold` (its
+  diagonal-loading PD correction does not change off-diagonal ranking).
+  It still has a niche when the downstream consumer needs a PD
+  covariance — e.g., for log-likelihood evaluation. We keep the entry
+  point but document that it does not improve edge ranking.
+
+**How to apply.** README and methodology describe the three candidates
+honestly: `weighted_sparse` is the production default, the other two
+are auxiliary modes with documented use cases. The acceptance-gate
+report names `weighted_sparse` as the candidate under evaluation.
+
 ## Open questions
 
-* Default zero policy. `multiplicative`, `pseudocount`, and `complete_case`
-  are exposed as a sensitivity axis. The default may be chosen only after
-  the training grid records FDR and runtime under each policy.
-* Default thresholding mode for `adaptive_threshold` (hard vs. soft). To be
-  frozen on the training grid before any holdout cell is touched.
-* Whether `pd_sparse` ships in the public API. Retained only if PD
-  correction improves numerical reliability without losing accuracy or
-  efficiency on the training grid.
+* Whether `weighted_sparse` clears acceptance gate 3 (runtime / peak
+  memory improvement vs the strongest accurate baseline) at the
+  holdout cell sizes (`p ∈ {200, 500, 1000}`). Training data shows
+  ~750× slower than SparCC at `p=100`; this must reverse as `p` grows
+  or the gate fails.
+* Whether the small AUROC delta vs SparCC (~0.002) survives the
+  holdout's larger cells.
 * Approximate q-values. Exposed only if observed simulation FDR is
   defensible across holdout scenarios; otherwise these stay `None`.
+* Whether to retune `adaptive_threshold` for a future release. Possible
+  improvements: lower `threshold_constant`, switch to soft mode by
+  default. Out of scope for this release because the production
+  estimator is already chosen.

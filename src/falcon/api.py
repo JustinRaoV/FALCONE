@@ -186,6 +186,15 @@ def infer_network(
 ) -> NetworkResult:
     """Infer a single-domain compositional network.
 
+    Defaults frozen on the 2026-06-03 training grid (see
+    ``docs/decision-log.md``):
+
+    * ``estimator="weighted_sparse"`` — top of every training scenario.
+    * ``zero_policy="multiplicative"`` — best when zero fraction <= 0.15;
+      re-run with ``zero_policy="complete_case"`` when zero fraction > 0.20.
+    * ``selection="stability"`` with ``n_resamples=100`` — primary
+      uncertainty output is ``selection_probability``.
+
     See ``docs/superpowers/specs/2026-06-02-single-domain-estimator-rebuild-design.md``
     section 5 for the schema and section 6 for the data flow.
     """

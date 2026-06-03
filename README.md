@@ -71,16 +71,23 @@ Three candidates share the public entrypoint. Each is a clean-room Python
 implementation derived from the published method description, not copied from
 any reference R code.
 
-| Key | Description |
-|---|---|
-| `adaptive_threshold` | COAT-style composition-adjusted thresholding with hard or soft thresholding. |
-| `weighted_sparse` | fastCCLasso-style weighted soft-thresholded covariance, alternating offset + soft-threshold updates. |
-| `pd_sparse` | Adaptive threshold + diagonal-loading PD correction that preserves selected support. |
+| Key | Role | Description |
+|---|---|---|
+| `weighted_sparse` | **production default** (frozen 2026-06-03 on training grid) | fastCCLasso-style weighted soft-thresholded covariance, alternating offset + soft-threshold updates. |
+| `adaptive_threshold` | auxiliary | COAT-style composition-adjusted thresholding with hard or soft thresholding. |
+| `pd_sparse` | auxiliary | Adaptive threshold + diagonal-loading PD correction that preserves selected support. Same edge ranking as `adaptive_threshold`; useful when the consumer needs a PD covariance. |
 
 Three zero-handling policies are exposed as a sensitivity axis:
-`multiplicative`, `pseudocount`, `complete_case`. The default may only be
-chosen after the training grid is evaluated; the benchmark records
-`zero_policy` per row so the choice never sneaks in.
+
+| Policy | When to use |
+|---|---|
+| `multiplicative` (default) | Low and moderate zero fraction (≤ 15 %). |
+| `pseudocount` | Equivalent to `multiplicative` on training cells; available for backward-compatibility studies. |
+| `complete_case` | **Re-run with this when zero fraction > 0.20.** Training showed +0.15 AUROC on `negative_binomial_zi` over `multiplicative`. |
+
+The benchmark records `zero_policy` per row so the choice is never silent.
+See `docs/decision-log.md` for the training-grid evidence behind these
+defaults.
 
 ---
 

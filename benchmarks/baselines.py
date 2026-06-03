@@ -94,11 +94,13 @@ def sparcc_closed_form(counts: np.ndarray) -> BaselineResult:
     t = diag[:, None] + diag[None, :] - 2 * cov_log
     np.fill_diagonal(t, 0.0)
 
-    # SparCC closed-form basis variance.
+    # SparCC sparse-average closed form (Friedman & Alm 2012, Eq. 9):
+    #   sum(omega^2) = total / (2 * (p - 1))
+    #   omega_i^2     = (sum_j t_ij - sum(omega^2)) / (p - 1)
     row_sums = t.sum(axis=1)
     total = t.sum()
-    mean_total = total / max(p * (p - 1), 1)
-    omega_sq = np.maximum((row_sums / max(p - 1, 1)) - mean_total, 1e-9)
+    sum_omega_sq = total / max(2 * (p - 1), 1)
+    omega_sq = np.maximum((row_sums - sum_omega_sq) / max(p - 1, 1), 1e-9)
     omega = np.sqrt(omega_sq)
 
     rho = (omega_sq[:, None] + omega_sq[None, :] - t) / (2.0 * np.outer(omega, omega))
