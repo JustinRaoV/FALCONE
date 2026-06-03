@@ -294,3 +294,25 @@ worktree management overhead.
 Part. Differential-test harness lives on `main` (shared infrastructure)
 and is inherited by each feature branch via the initial `git branch`
 fork point.
+
+## 2026-06-03 — Pre-registration of Line B calibration prediction (BEFORE holdout)
+
+**Prediction.** We expect aggregate ECE in [0.05, 0.12] on the 54-cell
+holdout under per-scenario isotonic calibration fit on the 39 training
+cells. Per-scenario ECE expected ≤ 0.20 on each of the 6 scenarios.
+
+**What triggers spec amendment.** Aggregate ECE > 0.15, OR any
+per-scenario ECE > 0.30 — both block further Line B work pending user
+consultation (spec §12).
+
+**Why pre-register.** The frozen-grid contract forbids post-hoc
+movement of acceptance thresholds. Recording the prediction before
+the holdout run prevents an "oh we'll relax it" failure mode if the
+holdout numbers come back worse than expected.
+
+**Procedure version.** Commits up to `3c50673` on `feat/line-b-calibration`
+(post-B4). The full evaluation run (Integration-Task 3) is the
+authoritative measurement; the smoke run at B4 (single sparse_random
+cell) showed aggregate_ece = 0.060, aggregate_brier = 0.008, which
+sits comfortably inside the predicted range but is not representative
+of the full holdout grid (single cell, single scenario).
