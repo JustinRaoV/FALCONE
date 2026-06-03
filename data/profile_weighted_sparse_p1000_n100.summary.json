@@ -1,0 +1,33 @@
+{
+  "wallclock_total_s": 253.5777933749996,
+  "n_resamples": 100,
+  "cell": {
+    "scenario": "sparse_random",
+    "n": 500,
+    "p": 1000,
+    "seed": 200,
+    "density": 0.002,
+    "edge_strength": 0.6,
+    "depth": 5000
+  },
+  "edges_selected": 435818,
+  "converged": true,
+  "iterations": 126,
+  "hot_function_cumulative_seconds": {
+    "eigvalsh (np.linalg.eigvalsh and friends)": 8.079,
+    "eigh (eigendecomposition (LAPACK syevd/syevr/syevr))": 253.121,
+    "estimate_weighted_sparse (weighted_sparse alternating loop entry)": 253.121,
+    "_default_weights (GEMM-based theta_ij estimate)": 1.052,
+    "_correlation_from_covariance (correlation extraction)": 0.286,
+    "select_by_stability (stability selection driver)": 252.025
+  },
+  "hot_function_percent_wallclock": {
+    "eigvalsh (np.linalg.eigvalsh and friends)": 3.1860045363090985,
+    "eigh (eigendecomposition (LAPACK syevd/syevr/syevr))": 99.8198606554147,
+    "estimate_weighted_sparse (weighted_sparse alternating loop entry)": 99.8198606554147,
+    "_default_weights (GEMM-based theta_ij estimate)": 0.41486282611674363,
+    "_correlation_from_covariance (correlation extraction)": 0.11278590139675729,
+    "select_by_stability (stability selection driver)": 99.38764615215999
+  },
+  "notes": ""
+}

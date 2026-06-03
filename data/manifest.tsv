@@ -3,3 +3,5 @@ data/README.md	docs	hand-written	-	repository licence (MIT)
 data/manifest.tsv	docs	hand-written	-	repository licence (MIT)
 data/public/secom_v1.0.0.md	pointer	hand-written; references Zenodo 10.5281/zenodo.6809029	-	CC-BY-4.0 (Zenodo archive); pointer file MIT
 data/public/hmp_16s.md	pointer	hand-written; references NIH BioProject PRJNA43021 / PRJNA48489	-	NIH public domain (HMP); pointer file MIT
+data/profile_weighted_sparse_p1000_n100.txt	measurement	cProfile dump of weighted_sparse + stability at p=1000 n_resamples=100 (seed=200); 2026-06-03 measurement informing optimization spec v2	uv run python benchmarks/profile_stability.py	repository licence (MIT)
+data/profile_weighted_sparse_p1000_n100.summary.json	measurement	per-function percent-wallclock summary extracted from the cProfile dump above	uv run python benchmarks/profile_stability.py	repository licence (MIT)
