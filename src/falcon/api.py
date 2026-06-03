@@ -83,8 +83,12 @@ def _build_estimator(
                 min_eigenvalue=r.min_eigenvalue,
                 notes="",
             )
+
         def support_fn(Z: np.ndarray) -> np.ndarray:
-            return estimate_fn(Z).covariance
+            n, p = Z.shape
+            lam = lambda_value if lambda_value is not None else _adaptive_lambda(n, p)
+            r = estimate_weighted_sparse(Z, lambda_value=lam, support_only=True)
+            return r.covariance
     elif estimator == "adaptive_threshold":
         def estimate_fn(Z: np.ndarray) -> _EstResult:
             r = estimate_adaptive_threshold(

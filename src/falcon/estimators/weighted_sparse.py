@@ -91,6 +91,7 @@ def estimate_weighted_sparse(
     weights: np.ndarray | None = None,
     max_iter: int = 200,
     tol: float = 1e-6,
+    support_only: bool = False,
 ) -> WeightedSparseResult:
     """Estimate the basis covariance via weighted soft thresholding."""
     if lambda_value < 0:
@@ -144,8 +145,14 @@ def estimate_weighted_sparse(
             converged = True
             break
 
-    correlation = _correlation_from_covariance(Sigma)
-    min_eig = float(np.linalg.eigvalsh(Sigma).min())
+    if support_only:
+        # Skip the O(p^3) eigvalsh and the unused correlation extraction.
+        # min_eigenvalue is recorded as NaN to signal "not computed".
+        correlation = Sigma
+        min_eig = float("nan")
+    else:
+        correlation = _correlation_from_covariance(Sigma)
+        min_eig = float(np.linalg.eigvalsh(Sigma).min())
 
     return WeightedSparseResult(
         covariance=Sigma,
